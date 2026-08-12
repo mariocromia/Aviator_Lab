@@ -1,0 +1,2 @@
+import {ConfigurationStudio} from '@/components/configuration-studio';
+export function SchedulePlansPage(){return <div className="p-5"><div className="mb-5"><h2 className="text-xl font-bold">Planos de horários</h2><p className="mt-1 text-xs text-muted">Crie intervalos reutilizáveis e selecione o plano desejado em cada Terminal.</p></div><ConfigurationStudio allowedKinds={['SCHEDULE_PLAN']} initialKind="SCHEDULE_PLAN"/></div>}
