@@ -1,8 +1,8 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, net, screen, type Display } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, screen, Tray, type Display } from 'electron';
 import path from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { aiChatRequestSchema, aiSettingsInputSchema, auditQuerySchema, backtestRequestSchema, configurationActionSchema, createPlatformInputSchema, createTerminalInputSchema, loginInputSchema, recentRoundsQuerySchema, recoverySnapshotIdSchema, resetTerminalInputSchema, saveConfigurationSchema, saveScreenProfileInputSchema, saveTerminalControlRuleInputSchema, screenCoordinateTestSchema, screenProfileActionSchema, setPlatformEnabledInputSchema, setTerminalSchedulePlanInputSchema, terminalControlRuleIdSchema, terminalHistoryQuerySchema, terminalIdSchema, testPlatformInputSchema, updatePlatformInputSchema, updateTerminalBankrollInputSchema, updateTerminalInputSchema, workspaceArchiveSchema, type AiChatResponse, type AiModelOption, type AiSettingsView, type ApiResult, type AuditRecord, type BacktestRun, type ConfigurationDocument, type ConfigurationKind, type PerformanceBenchmarkResult, type Platform, type PlatformTestResult, type RecoverySnapshot, type ScreenCaptureResult, type ScreenMockRun, type ScreenProfile, type ScreenProfileValidation, type SystemDiagnostics, type Terminal, type TerminalControlRule, type UserSession } from '@aviator/shared';
+import { aiChatRequestSchema, aiSettingsInputSchema, auditQuerySchema, backtestRequestSchema, configurationActionSchema, createPlatformInputSchema, createTerminalInputSchema, loginInputSchema, recentRoundsQuerySchema, recoverySnapshotIdSchema, resetTerminalInputSchema, saveConfigurationSchema, saveScreenProfileInputSchema, saveTerminalControlRuleInputSchema, screenCoordinateTestSchema, screenProfileActionSchema, setPlatformEnabledInputSchema, setTerminalSchedulePlanInputSchema, terminalControlRuleIdSchema, terminalHistoryQuerySchema, terminalIdSchema, testPlatformInputSchema, updatePlatformInputSchema, updateTerminalBankrollInputSchema, updateTerminalInputSchema, workspaceArchiveSchema, type AiChatResponse, type AiModelOption, type AiSettingsView, type ApiResult, type AuditRecord, type BacktestRun, type ConfigurationDocument, type ConfigurationKind, type PerformanceBenchmarkResult, type Platform, type PlatformTestResult, type RecoverySnapshot, type RoundArchiveStatus, type ScreenCaptureResult, type ScreenMockRun, type ScreenProfile, type ScreenProfileValidation, type SystemDiagnostics, type Terminal, type TerminalControlRule, type UserSession } from '@aviator/shared';
 import { TerminalManager } from '@aviator/terminal';
 import { SimulationEngine } from '@aviator/simulator';
 import { MockScreenController, validateScreenProfile } from '@aviator/screen-controller';
@@ -14,6 +14,8 @@ import { CollectorManager } from './collector-manager.js';
 import { ScreenAutomationService } from './screen-automation-service.js';
 import { splashHtml } from './splash.js';
 import { OpenRouterService } from './openrouter-service.js';
+import { ArchiveDatabase } from './archive-database.js';
+import { ArchiveSyncService } from './archive-sync-service.js';
 
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
@@ -25,6 +27,11 @@ let terminalManager: TerminalManager;
 let roundEventBus: RoundEventBus;
 let screenAutomation: ScreenAutomationService;
 let openRouterService: OpenRouterService;
+let archiveDatabase: ArchiveDatabase;
+let archiveSync: ArchiveSyncService;
+let tray: Tray | null = null;
+let isQuitting = false;
+let archivePublishTimer: ReturnType<typeof setInterval> | null = null;
 const INTERFACE_SCALES = new Set([0.8, 0.9, 1, 1.1, 1.25]);
 
 function createSplashWindow() {
@@ -85,6 +92,9 @@ function createWindow() {
   const savedScale = database.getAppSetting<number>('interface_scale');
   mainWindow.webContents.setZoomFactor(savedScale && INTERFACE_SCALES.has(savedScale) ? savedScale : 1);
   mainWindow.once('ready-to-show', revealMainWindow);
+  mainWindow.on('close', event => {
+    if (!isQuitting && backgroundCollectorEnabled()) { event.preventDefault(); mainWindow?.hide(); }
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
     if (errorCode === -3) return;
@@ -97,13 +107,52 @@ function createWindow() {
   void load.catch(error => updateSplash(`Falha ao carregar a interface: ${error instanceof Error ? error.message : String(error)}`, 100, true));
 }
 
+function backgroundCollectorEnabled() { return database?.getAppSetting<boolean>('background_collector_enabled') ?? true; }
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  else { mainWindow.show(); mainWindow.focus(); }
+}
+
+function createTray() {
+  if (tray) return;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" rx="8" fill="#2563eb"/><path d="M8 23 15 8h3l6 15h-4l-1-4h-6l-1 4H8Zm6-7h4l-2-6-2 6Z" fill="white"/></svg>`;
+  tray = new Tray(nativeImage.createFromDataURL(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`));
+  tray.setToolTip('Aviator • Coletor histórico ativo');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Abrir Aviator Strategy Lab', click: showMainWindow },
+    { label: 'Publicar histórico agora', click: () => { void archiveSync.publish().catch(() => undefined); } },
+    { type: 'separator' },
+    { label: 'Encerrar coletor', click: () => { isQuitting = true; app.quit(); } }
+  ]));
+  tray.on('double-click', showMainWindow);
+}
+
+function configureBackgroundStartup() {
+  if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: backgroundCollectorEnabled(), args: ['--background'] });
+}
+
+function scheduleArchivePublishing() {
+  if (archivePublishTimer) clearInterval(archivePublishTimer);
+  archivePublishTimer = setInterval(() => {
+    const mode = archiveSync.status().syncMode;
+    if (mode === 'PUBLISHER') void archiveSync.publish().catch(() => undefined);
+    if (mode === 'SUBSCRIBER') void archiveSync.importLatest().catch(() => undefined);
+  }, 15 * 60_000);
+}
+
 app.whenReady()
   .then(async () => {
-    createSplashWindow();
+    const backgroundLaunch = process.argv.includes('--background');
+    if (!backgroundLaunch) createSplashWindow();
     updateSplash('Abrindo banco de dados local...', 18);
     console.info('[SYSTEM] Electron ready; initializing SQLite.');
     database = new AppDatabase(path.join(app.getPath('userData'), 'aviator-strategy-lab.db'));
-    openRouterService = new OpenRouterService(database, net.fetch as unknown as typeof fetch);
+    archiveDatabase = new ArchiveDatabase(path.join(app.getPath('userData'), 'aviator-round-archive.db'));
+    archiveSync = new ArchiveSyncService(archiveDatabase);
+    const archiveConfiguration = database.getAppSetting<{ directory: string; mode: 'PUBLISHER' | 'SUBSCRIBER' }>('archive_sync');
+    archiveSync.configure(archiveConfiguration?.directory ?? null, archiveConfiguration?.mode ?? null);
+    openRouterService = new OpenRouterService(database, archiveDatabase, net.fetch as unknown as typeof fetch);
     console.info('[SYSTEM] SQLite initialized.');
     updateSplash('Validando os serviços locais...', 38);
     await new LocalLicenseService().initialize();
@@ -127,6 +176,7 @@ app.whenReady()
     collectorManager = new CollectorManager(
       net.fetch as unknown as import('@aviator/tipminer').FetchLike,
       database,
+      archiveDatabase,
       notifyDataChanged,
       async round => {
         const delivered = await terminalManager.routeRoundToTerminals(round);
@@ -136,7 +186,10 @@ app.whenReady()
     updateSplash('Conectando a interface aos serviços...', 76);
     registerIpc();
     console.info('[SYSTEM] IPC registered; creating main window.');
-    createWindow();
+    createTray();
+    configureBackgroundStartup();
+    scheduleArchivePublishing();
+    if (!backgroundLaunch) createWindow();
     updateSplash('Carregando a interface...', 88);
     collectorManager.syncPlatforms(database.getPlatforms());
     console.info('[SYSTEM] Collectors started.');
@@ -153,8 +206,8 @@ app.whenReady()
     app.quit();
   });
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { screenAutomation?.setPaused(true); globalShortcut.unregisterAll(); collectorManager?.stopAll(); });
+app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !backgroundCollectorEnabled()) app.quit(); });
+app.on('before-quit', () => { isQuitting = true; screenAutomation?.setPaused(true); globalShortcut.unregisterAll(); collectorManager?.stopAll(); if (archivePublishTimer) clearInterval(archivePublishTimer); });
 
 function registerIpc() {
   ipcMain.handle('app:bootstrap', () => success({ ...database.bootstrap(), collectors: collectorManager.snapshots(), terminalRuntimes: terminalManager.getRuntimes(), eventBus: roundEventBus.snapshot() }));
@@ -337,7 +390,8 @@ function registerIpc() {
     const parsed = backtestRequestSchema.safeParse(raw);
     if (!parsed.success) return failure('Parâmetros do backtest inválidos.');
     const request = parsed.data;
-    const rounds = database.getBacktestRounds(request.platformId, request.limit);
+    const archivedRounds = archiveDatabase.getRounds(request.platformId, request.limit, true);
+    const rounds = archivedRounds.length >= Math.min(10, request.limit) ? archivedRounds : database.getBacktestRounds(request.platformId, request.limit);
     const gameStrategy = database.getGameStrategyConfig(request.gameStrategyId);
     const betStrategy = database.getBetStrategyConfig(request.betStrategyId);
     const betPlan = database.getBetPlanConfig(request.betPlanId);
@@ -352,6 +406,23 @@ function registerIpc() {
     return parsed.success ? success(database.listAudit(parsed.data.limit, parsed.data.category)) : failure('Filtro de auditoria inválido.');
   });
   ipcMain.handle('system:diagnostics', (): ApiResult<SystemDiagnostics> => success(database.getSystemDiagnostics()));
+  ipcMain.handle('archive:status', (): ApiResult<RoundArchiveStatus> => success({ ...archiveSync.status(), backgroundEnabled: backgroundCollectorEnabled() }));
+  ipcMain.handle('archive:configure', async (_event, raw): Promise<ApiResult<RoundArchiveStatus>> => {
+    try {
+      const mode = raw?.mode === 'PUBLISHER' || raw?.mode === 'SUBSCRIBER' ? raw.mode as 'PUBLISHER' | 'SUBSCRIBER' : null;
+      if (!mode) return failure('Modo de sincronização inválido.');
+      const options = { title:'Selecionar pasta do Google Drive',properties:['openDirectory','createDirectory'] as Array<'openDirectory'|'createDirectory'> };
+      const target = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+      if (target.canceled || !target.filePaths[0]) return success({ ...archiveSync.status(), backgroundEnabled: backgroundCollectorEnabled() });
+      const configuration = { directory: target.filePaths[0], mode };
+      database.setAppSetting('archive_sync', configuration); archiveSync.configure(configuration.directory, configuration.mode);
+      if (mode === 'PUBLISHER') await archiveSync.publish(); else await archiveSync.importLatest().catch(() => 0);
+      return success({ ...archiveSync.status(), backgroundEnabled: backgroundCollectorEnabled() });
+    } catch(error) { return failure(error instanceof Error?error.message:'Falha ao configurar o histórico.'); }
+  });
+  ipcMain.handle('archive:publish', async (): Promise<ApiResult<RoundArchiveStatus>> => { try { await archiveSync.publish(); return success({ ...archiveSync.status(), backgroundEnabled: backgroundCollectorEnabled() }); } catch(error) { return failure(error instanceof Error?error.message:'Falha ao publicar o histórico.'); } });
+  ipcMain.handle('archive:import', async (): Promise<ApiResult<{ inserted:number; status:RoundArchiveStatus }>> => { try { const inserted=await archiveSync.importLatest(); return success({inserted,status:{...archiveSync.status(),backgroundEnabled:backgroundCollectorEnabled()}}); } catch(error) { return failure(error instanceof Error?error.message:'Falha ao importar o histórico.'); } });
+  ipcMain.handle('archive:background', (_event, raw): ApiResult<RoundArchiveStatus> => { const enabled=Boolean(raw?.enabled);database.setAppSetting('background_collector_enabled',enabled);configureBackgroundStartup();return success({...archiveSync.status(),backgroundEnabled:enabled}); });
   ipcMain.handle('system:benchmark',():ApiResult<PerformanceBenchmarkResult[]>=>{const terminal=database.listTerminals()[0];if(!terminal)return failure('Cadastre ao menos um Terminal.');const rounds=database.getRecentRounds(terminal.platformId,500).reverse();if(rounds.length<10)return failure('São necessárias ao menos 10 rodadas persistidas.');const gameStrategy=database.getGameStrategyConfig(terminal.gameStrategyId);const betStrategy=database.getBetStrategyConfig(terminal.betStrategyId);const betPlan=database.getBetPlanConfig(terminal.betPlanId);if(!gameStrategy||!betStrategy||!betPlan)return failure('Configuração do Terminal inválida.');const engine=new SimulationEngine();const results=[10,20,50,100].map(terminalCount=>{const started=performance.now();for(let index=0;index<terminalCount;index++)engine.run({rounds,gameStrategyId:terminal.gameStrategyId,gameStrategy,betStrategyId:terminal.betStrategyId,betStrategy,betPlan,initialBankrollCents:terminal.initialBankrollCents});const durationMs=Math.max(.01,performance.now()-started);const totalEvaluations=terminalCount*rounds.length;return{terminalCount,roundsPerTerminal:rounds.length,totalEvaluations,durationMs,evaluationsPerSecond:Math.round(totalEvaluations/durationMs*1000)}});database.logEvent('SYSTEM','INFO','PERFORMANCE_BENCHMARK_FINISHED',{results});return success(results);});
   ipcMain.handle('recovery:list',():ApiResult<RecoverySnapshot[]>=>success(database.listRecoverySnapshots()));
   ipcMain.handle('recovery:restore',(_event,raw):ApiResult<boolean>=>{const parsed=recoverySnapshotIdSchema.safeParse(raw);if(!parsed.success)return failure('Snapshot inválido.');try{screenAutomation.setPaused(true);database.restoreRecoverySnapshot(parsed.data);notifyDataChanged();return success(true);}catch(error){return failure(error instanceof Error?error.message:'Falha ao restaurar snapshot.');}});

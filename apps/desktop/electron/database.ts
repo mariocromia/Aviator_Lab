@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import type { AuditRecord, BetCondition, BetDecision, BetExecution, BetPlanConfig, BetStageEvent, BetStrategyConfig, BootstrapData, ConfigurationDocument, ConfigurationKind, GameSignal, GameStrategyConfig, MultiplierCondition, NamedConfiguration, NormalizedRound, Platform, RecoverySnapshot, ResultAnalyzerState, RoundAnnotation, ScreenProfile, SystemDiagnostics, Terminal, TerminalControlRule, TerminalHistoryItem, TerminalRuntime, TerminalSchedule, UserSession, WorkspaceArchive } from '@aviator/shared';
+import { BUILT_IN_PLATFORMS } from './platform-catalog.js';
 
 const IDS = {
   master: '11111111-1111-4111-8111-111111111111',
@@ -24,6 +25,7 @@ export class AppDatabase {
     this.db.exec('PRAGMA foreign_keys = ON');
     this.migrate();
     this.seed();
+    this.installBuiltInPlatforms();
   }
 
   private migrate() {
@@ -169,6 +171,22 @@ export class AppDatabase {
   }
 
   private ensureColumn(table:string,column:string,declaration:string){const columns=this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{name:string}>;if(!columns.some(item=>item.name===column))this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);}
+
+  private installBuiltInPlatforms() {
+    const now = new Date().toISOString();
+    const insert = this.db.prepare(`INSERT OR IGNORE INTO platforms
+      (id,name,slug,game,enabled,source_type,tipminer_round_uuid,poll_interval_ms,request_timeout_ms,history_limit,collector_status,created_at,updated_at)
+      VALUES (?, ?, ?, 'aviator', 1, 'TIPMINER', ?, 2000, 5000, 2000, 'OFFLINE', ?, ?)`);
+    const update = this.db.prepare(`UPDATE platforms SET name=?,tipminer_round_uuid=?,updated_at=? WHERE slug=?`);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const platform of BUILT_IN_PLATFORMS) {
+        insert.run(platform.id, platform.name, platform.slug, platform.tipMinerRoundUuid, now, now);
+        update.run(platform.name, platform.tipMinerRoundUuid, now, platform.slug);
+      }
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
 
   private seed() {
     const now = new Date().toISOString();

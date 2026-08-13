@@ -311,6 +311,19 @@ export interface RecoverySnapshot { id:string; createdAt:string; platforms:numbe
 export interface PerformanceBenchmarkResult { terminalCount:number; roundsPerTerminal:number; totalEvaluations:number; durationMs:number; evaluationsPerSecond:number; }
 export interface SystemDiagnostics { databaseIntegrity: string; platforms: number; terminals: number; rounds: number; eventLogs: number; screenProfiles: number; recoverySnapshots: number; }
 
+export interface RoundArchiveStatus {
+  databasePath: string;
+  retentionPerPlatform: number;
+  totalRounds: number;
+  platforms: Array<{ platformId: string; platformName: string; rounds: number; newestRoundAt: string | null }>;
+  syncDirectory: string | null;
+  syncMode: 'PUBLISHER' | 'SUBSCRIBER' | null;
+  lastPublishedAt: string | null;
+  lastImportedAt: string | null;
+  lastError: string | null;
+  backgroundEnabled: boolean;
+}
+
 export interface UserSession {
   id: string;
   userId: string;

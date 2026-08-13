@@ -84,7 +84,7 @@ export const recoverySnapshotIdSchema=z.string().uuid();
 
 export const backtestRequestSchema = z.object({
   platformId: z.string().uuid(), gameStrategyId: z.string().uuid(), betStrategyId: z.string().uuid(), betPlanId: z.string().uuid(),
-  initialBankrollCents: z.number().int().positive().max(1_000_000_000), limit: z.number().int().min(10).max(20_000)
+  initialBankrollCents: z.number().int().positive().max(1_000_000_000), limit: z.number().int().min(10).max(300_000)
 });
 
 export const auditQuerySchema = z.object({ limit: z.number().int().min(1).max(2_000).default(200), category: z.string().max(40).nullable().default(null) });

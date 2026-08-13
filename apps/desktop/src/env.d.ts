@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type { AiChatResponse, AiModelOption, AiSettingsView, ApiResult, AuditRecord, BacktestRun, BootstrapData, ConfigurationDocument, ConfigurationKind, PerformanceBenchmarkResult, Platform, PlatformTestResult, RecoverySnapshot, ScreenCaptureResult, ScreenMockRun, ScreenProfile, ScreenProfileValidation, SystemDiagnostics, Terminal, TerminalControlRule, UserSession } from '@aviator/shared';
+import type { AiChatResponse, AiModelOption, AiSettingsView, ApiResult, AuditRecord, BacktestRun, BootstrapData, ConfigurationDocument, ConfigurationKind, PerformanceBenchmarkResult, Platform, PlatformTestResult, RecoverySnapshot, RoundArchiveStatus, ScreenCaptureResult, ScreenMockRun, ScreenProfile, ScreenProfileValidation, SystemDiagnostics, Terminal, TerminalControlRule, UserSession } from '@aviator/shared';
 
 declare global {
   interface Window {
@@ -41,6 +41,11 @@ declare global {
       runBacktest(input: unknown): Promise<ApiResult<BacktestRun>>;
       listAudit(input: unknown): Promise<ApiResult<AuditRecord[]>>;
       getSystemDiagnostics(): Promise<ApiResult<SystemDiagnostics>>;
+      getRoundArchiveStatus(): Promise<ApiResult<RoundArchiveStatus>>;
+      configureRoundArchive(mode:'PUBLISHER'|'SUBSCRIBER'):Promise<ApiResult<RoundArchiveStatus>>;
+      publishRoundArchive():Promise<ApiResult<RoundArchiveStatus>>;
+      importRoundArchive():Promise<ApiResult<{inserted:number;status:RoundArchiveStatus}>>;
+      setBackgroundCollectorEnabled(enabled:boolean):Promise<ApiResult<RoundArchiveStatus>>;
       getInterfaceScale(): Promise<ApiResult<number>>;
       setInterfaceScale(scale: number): Promise<ApiResult<number>>;
       runPerformanceBenchmark():Promise<ApiResult<PerformanceBenchmarkResult[]>>;

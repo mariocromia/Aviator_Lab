@@ -1,6 +1,7 @@
 import type { CollectorSnapshot, NormalizedRound, Platform } from '@aviator/shared';
 import { LiveRoundClassifier, RoundDeduplicator, TipMinerClient, TipMinerRoundNormalizer, type FetchLike } from '@aviator/tipminer';
 import { AppDatabase } from './database.js';
+import { ArchiveDatabase } from './archive-database.js';
 
 type DataChangedCallback = () => void;
 
@@ -19,6 +20,7 @@ class PlatformCollector {
     private platforms: Platform[],
     private readonly client: TipMinerClient,
     private readonly database: AppDatabase,
+    private readonly archive: ArchiveDatabase,
     private readonly deduplicator: RoundDeduplicator,
     private readonly classifier: LiveRoundClassifier,
     private readonly normalizer: TipMinerRoundNormalizer,
@@ -73,6 +75,7 @@ class PlatformCollector {
     try {
       const raw = await this.client.getHistory({ roundUuid: platform.tipMinerRoundUuid, limit: Math.max(...this.platforms.map(item => item.historyLimit)), timeoutMs: Math.max(...this.platforms.map(item => item.requestTimeoutMs)) });
       const normalized = this.normalizer.normalizeMany(raw, platform.id);
+      const archived = this.archive.insertFeedRounds(this.platforms, normalized);
       const unseen = this.deduplicator.filterUnseen(normalized);
       const classified = this.classifier.classify(platform.id, unseen);
       let inserted = 0;
@@ -84,8 +87,8 @@ class PlatformCollector {
       const statusChanged = this.status !== 'ONLINE';
       this.status = 'ONLINE'; this.lastSuccessAt = new Date().toISOString(); this.lastError = null; this.consecutiveFailures = 0;
       for (const linkedPlatform of this.platforms) this.database.updateCollectorStatus(linkedPlatform.id, 'ONLINE');
-      if(Date.now()-this.lastRetentionAt>3_600_000){this.database.pruneRetention(10_000,30);this.lastRetentionAt=Date.now();}
-      this.database.logEvent('TIPMINER', 'INFO', 'POLL_SUCCESS', { platformId: platform.id, sharedPlatforms: this.platforms.length, received: raw.length, unseen: unseen.length, inserted });
+      if(Date.now()-this.lastRetentionAt>3_600_000){this.database.pruneRetention(10_000,30);this.archive.prune();this.lastRetentionAt=Date.now();}
+      this.database.logEvent('TIPMINER', 'INFO', 'POLL_SUCCESS', { platformId: platform.id, sharedPlatforms: this.platforms.length, received: raw.length, unseen: unseen.length, inserted, archived });
       if (inserted > 0 || statusChanged) this.onDataChanged();
     } catch (error) {
       const previousStatus = this.status;
@@ -106,7 +109,7 @@ export class CollectorManager {
   private readonly classifier = new LiveRoundClassifier();
   private readonly normalizer = new TipMinerRoundNormalizer();
 
-  constructor(fetcher: FetchLike, private readonly database: AppDatabase, private readonly onDataChanged: DataChangedCallback, private readonly onRound: (round: NormalizedRound) => Promise<void>) {
+  constructor(fetcher: FetchLike, private readonly database: AppDatabase, private readonly archive: ArchiveDatabase, private readonly onDataChanged: DataChangedCallback, private readonly onRound: (round: NormalizedRound) => Promise<void>) {
     this.client = new TipMinerClient(fetcher);
   }
 
@@ -120,7 +123,7 @@ export class CollectorManager {
     for (const [tipMinerRoundUuid, linkedPlatforms] of platformsByFeed) {
       const existing = this.collectors.get(tipMinerRoundUuid);
       if (existing) { existing.updatePlatforms(linkedPlatforms); continue; }
-      const collector = new PlatformCollector(linkedPlatforms, this.client, this.database, this.deduplicator, this.classifier, this.normalizer, this.onDataChanged, this.onRound);
+      const collector = new PlatformCollector(linkedPlatforms, this.client, this.database, this.archive, this.deduplicator, this.classifier, this.normalizer, this.onDataChanged, this.onRound);
       this.collectors.set(tipMinerRoundUuid, collector); collector.start();
     }
     for (const [tipMinerRoundUuid, collector] of this.collectors) {

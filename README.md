@@ -40,9 +40,12 @@ O banco usa o SQLite nativo do Node embarcado no Electron e é criado no diretó
 ### Retenção local
 
 - até 10.000 rodadas persistidas por plataforma;
+- arquivo histórico independente com até 300.000 rodadas por plataforma, otimizado por UUID compartilhado;
 - histórico operacional de cada Terminal mantido por até 30 dias;
 - limpeza automática horária, com índices dedicados e preservação de registros ainda referenciados;
 - Monitor ao vivo paginado em 50, 100, 250 ou 500 rodadas e filtro por casa de aposta.
+
+O coletor histórico pode continuar na bandeja do Windows, iniciar com o sistema e distribuir snapshots verificados por SHA-256 através de uma pasta local sincronizada pelo Google Drive. Consulte [docs/historical-collector.md](docs/historical-collector.md).
 
 ## Screen Agent opcional
 

@@ -1,6 +1,7 @@
 import { safeStorage } from 'electron';
 import type { AiChatRequest, AiChatResponse, AiModelOption, AiSettingsView, NormalizedRound, TerminalHistoryItem } from '@aviator/shared';
 import type { AppDatabase } from './database.js';
+import type { ArchiveDatabase } from './archive-database.js';
 
 const SETTINGS_KEY = 'openrouter.ai';
 const DEFAULT_MODEL = 'openrouter/auto';
@@ -10,7 +11,7 @@ interface StoredAiSettings { model: string; transcriptionModel: string; encrypte
 interface OpenRouterErrorPayload { error?: { message?: string }; }
 
 export class OpenRouterService {
-  constructor(private readonly database: AppDatabase, private readonly fetcher: typeof fetch) {}
+  constructor(private readonly database: AppDatabase, private readonly archive: ArchiveDatabase, private readonly fetcher: typeof fetch) {}
 
   getSettings(): AiSettingsView {
     const stored = this.readSettings();
@@ -116,7 +117,8 @@ export class OpenRouterService {
     }
     const platform = input.platformId ? this.database.getPlatform(input.platformId) : null;
     if (!platform) throw new Error('Plataforma não encontrada.');
-    const rounds = this.database.getRecentRoundsByFeed(platform.id, input.historyLimit);
+    const archived = this.archive.getRounds(platform.id, input.historyLimit);
+    const rounds = archived.length ? archived : this.database.getRecentRoundsByFeed(platform.id, input.historyLimit);
     return { scope: `platform:${platform.id}`, records: rounds.length, data: { scope: 'PLATFORM', platform: { id: platform.id, name: platform.name, game: platform.game }, sample: summarizeRounds(rounds), recentRounds: compactRounds(rounds.slice(0, 200)) } };
   }
 
