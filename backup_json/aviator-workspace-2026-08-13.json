@@ -1,0 +1,305 @@
+{
+  "format": "AVIATOR_STRATEGY_LAB",
+  "version": 2,
+  "exportedAt": "2026-08-13T11:13:30.366Z",
+  "platforms": [
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "EstrelaBet",
+      "slug": "estrelabet",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "48323e32-3590-4e2f-b6fe-09d5fbc811c9",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 1500,
+      "historyLimit": 200,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T00:30:57.008Z",
+      "updatedAt": "2026-08-13T11:13:29.906Z"
+    }
+  ],
+  "terminals": [
+    {
+      "id": "88888888-8888-4888-8888-888888888888",
+      "name": "EstrelaBet • 01",
+      "sortOrder": 1,
+      "platformId": "22222222-2222-4222-8222-222222222222",
+      "gameStrategyId": "4441bf2c-b919-40a0-982e-b407657dd4a4",
+      "betStrategyId": "55555555-5555-4555-8555-555555555555",
+      "betStrategyWinId": "44444444-4444-4444-8444-444444444444",
+      "betStrategyLossId": "55555555-5555-4555-8555-555555555555",
+      "betPlanId": "66666666-6666-4666-8666-666666666666",
+      "betPlanWinId": "66666666-6666-4666-8666-666666666666",
+      "betPlanLossId": "66666666-6666-4666-8666-666666666666",
+      "screenProfileId": null,
+      "mode": "SIMULATION",
+      "enabled": true,
+      "paused": false,
+      "initialBankrollCents": 50000,
+      "currentBankrollCents": 50900,
+      "gameWins": 144,
+      "gameLosses": 162,
+      "createdAt": "2026-08-13T00:30:57.008Z",
+      "updatedAt": "2026-08-13T11:11:56.474Z"
+    }
+  ],
+  "screenProfiles": [],
+  "gameStrategies": [
+    {
+      "id": "4441bf2c-b919-40a0-982e-b407657dd4a4",
+      "name": "1,50 a 2,00 • 3 menores que 2,00x",
+      "sortOrder": 1,
+      "config": {
+        "trigger": [
+          {
+            "operator": "GT",
+            "value": 1.5
+          },
+          {
+            "operator": "LT",
+            "value": 99
+          }
+        ],
+        "win": [
+          {
+            "operator": "GTE",
+            "value": 2
+          }
+        ],
+        "loss": [
+          {
+            "operator": "BETWEEN",
+            "value": [
+              0,
+              1.99
+            ]
+          }
+        ],
+        "afterLoss": [
+          {
+            "operator": "LT",
+            "value": 1.5
+          }
+        ],
+        "release": [
+          {
+            "operator": "GT",
+            "value": 1.5
+          }
+        ],
+        "releaseConsecutiveCount": 2
+      }
+    }
+  ],
+  "betStrategies": [
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "name": "Entrada após 1 Win",
+      "sortOrder": 10,
+      "config": {
+        "rules": [
+          {
+            "id": "44444444-4444-4444-8444-444444444444:default",
+            "name": "Entrada após 1 Win",
+            "enabled": true,
+            "priority": 1,
+            "conditions": [
+              {
+                "field": "currentWinStreak",
+                "operator": "EQ",
+                "value": 1
+              }
+            ],
+            "action": "ENTER",
+            "betPlanId": "77777777-7777-4777-8777-777777777777",
+            "onWinBetPlanId": "66666666-6666-4666-8666-666666666666",
+            "onWinPlanBehavior": "REPEAT_UNTIL_LOSS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "name": "Loss streak dinâmica",
+      "sortOrder": 20,
+      "config": {
+        "rules": [
+          {
+            "id": "55555555-5555-4555-8555-555555555555:default",
+            "name": "Loss streak dinâmica",
+            "enabled": true,
+            "priority": 1,
+            "conditions": [
+              {
+                "field": "currentLossStreak",
+                "operator": "EQ",
+                "referenceField": "lastClosedLossStreak"
+              }
+            ],
+            "action": "ENTER"
+          }
+        ]
+      }
+    }
+  ],
+  "betPlans": [
+    {
+      "id": "77777777-7777-4777-8777-777777777777",
+      "name": "Plano B • Entrada Dupla",
+      "sortOrder": 2,
+      "config": {
+        "stages": [
+          {
+            "index": 0,
+            "label": "BASE",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 300,
+                "cashout": 1.5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 300
+                }
+              },
+              {
+                "slot": 2,
+                "amountCents": 150,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 150
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "66666666-6666-4666-8666-666666666666",
+      "name": "Plano A • Única + G1 + G2 + G3",
+      "sortOrder": 10,
+      "config": {
+        "stages": [
+          {
+            "index": 0,
+            "label": "BASE",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 150,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 150,
+                  "minCents": 1,
+                  "maxCents": 5000
+                }
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "label": "GALE 1",
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            },
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 300,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 300,
+                  "maxCents": 5000
+                }
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "label": "GALE 2",
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            },
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 600,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 600,
+                  "maxCents": 5000
+                }
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "label": "GALE 3",
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            },
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1200,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1200
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "schedulePlans": [],
+  "terminalSchedules": [],
+  "terminalControlRules": [
+    {
+      "id": "6f237796-4b4b-49d6-9976-48463f7e3f94",
+      "name": "Pausar e retomar por sequência",
+      "sortOrder": 1,
+      "enabled": false,
+      "sourceTerminalId": "88888888-8888-4888-8888-888888888888",
+      "targetTerminalId": "88888888-8888-4888-8888-888888888888",
+      "metric": "lastCycleLossCount",
+      "operator": "GT",
+      "value": 2,
+      "referenceMetric": null,
+      "action": "PAUSE",
+      "resumeMetric": "lastCycleLossCount",
+      "resumeOperator": "LT",
+      "resumeValue": 3,
+      "resumeReferenceMetric": null,
+      "createdAt": "2026-08-13T02:05:40.033Z",
+      "updatedAt": "2026-08-13T08:44:29.240Z"
+    },
+    {
+      "id": "11823b9d-4857-4520-bc6a-5e2cfbf94dfa",
+      "name": "Pausar e retomar por sequência",
+      "sortOrder": 2,
+      "enabled": true,
+      "sourceTerminalId": "88888888-8888-4888-8888-888888888888",
+      "targetTerminalId": "88888888-8888-4888-8888-888888888888",
+      "metric": "lastCycleLossCount",
+      "operator": "GTE",
+      "value": 3,
+      "referenceMetric": null,
+      "action": "PAUSE",
+      "resumeMetric": "lastCycleLossCount",
+      "resumeOperator": "LTE",
+      "resumeValue": 3,
+      "resumeReferenceMetric": null,
+      "createdAt": "2026-08-13T11:09:47.766Z",
+      "updatedAt": "2026-08-13T11:09:47.766Z"
+    }
+  ]
+}
