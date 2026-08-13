@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('aviator', {
   logout: () => ipcRenderer.invoke('auth:logout'),
   createTerminal: (input: unknown) => ipcRenderer.invoke('terminal:create', input),
   updateTerminal: (input: unknown) => ipcRenderer.invoke('terminal:update', input),
+  syncTerminal: (id:string) => ipcRenderer.invoke('terminal:sync', id),
   duplicateTerminal: (id: string) => ipcRenderer.invoke('terminal:duplicate', id),
   deleteTerminal: (id: string) => ipcRenderer.invoke('terminal:delete', id),
   resetTerminal:(id:string,mode:'FINANCIAL'|'FULL')=>ipcRenderer.invoke('terminal:reset',{id,mode}),

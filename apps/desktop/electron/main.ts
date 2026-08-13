@@ -199,6 +199,11 @@ function registerIpc() {
     notifyDataChanged();
     return success(terminal);
   });
+  ipcMain.handle('terminal:sync',(_event,raw):ApiResult<boolean>=>{
+    const parsed=terminalIdSchema.safeParse(raw);
+    if(!parsed.success||!terminalManager.synchronizeTerminal(parsed.data))return failure('Terminal não encontrado.');
+    notifyDataChanged();return success(true);
+  });
   ipcMain.handle('terminal:set-paused', (_event, raw): ApiResult<boolean> => {
     const parsed = terminalIdSchema.safeParse(raw?.id);
     if (!parsed.success || typeof raw?.paused !== 'boolean') return failure('Operação inválida.');

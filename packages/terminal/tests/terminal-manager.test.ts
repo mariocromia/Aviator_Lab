@@ -106,6 +106,14 @@ describe('TerminalManager', () => {
     expect(await manager.routeRoundToTerminals(makeRound(1.72, nextPlatformId))).toBe(1);
   });
 
+  it('synchronizes terminal configuration without clearing analyzed history',()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Sincronizável');repository.saveTerminal(terminal);const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();const runtime=manager.getRuntime(terminal.id)!;
+    runtime.gameStrategyRuntime.state='WAIT_RELEASE';runtime.gameStrategyRuntime.triggerRoundId=crypto.randomUUID();runtime.gameStrategyRuntime.releaseProgress=2;runtime.resultAnalyzerState.recentPattern='WLW';runtime.resultAnalyzerState.winCount=2;runtime.resultAnalyzerState.lossCount=1;
+    expect(manager.synchronizeTerminal(terminal.id)).toBe(true);
+    expect(manager.getRuntime(terminal.id)?.gameStrategyRuntime).toMatchObject({state:'SEARCH_TRIGGER',triggerRoundId:null,releaseProgress:0});
+    expect(manager.getRuntime(terminal.id)?.resultAnalyzerState).toMatchObject({recentPattern:'WLW',winCount:2,lossCount:1});
+  });
+
   it('labels settled betting stages as BASE and GALE without mixing them with game signals', async () => {
     const repository = new MemoryRepository(); const terminal = makeTerminal('T1'); repository.saveTerminal(terminal);
     const manager = new TerminalManager(repository, new RoundEventBus()); manager.initialize();
@@ -249,23 +257,37 @@ describe('TerminalManager', () => {
     expect(manager.getRuntime(target.id)?.status).toBe('RUNNING');expect(manager.getRuntime(target.id)?.pauseState.type).toBe('NONE');
   });
 
+  it('resumes when its release condition matches even if the original pause metric remains true',async()=>{
+    const repository=new MemoryRepository();const source=makeTerminal('Origem persistente');const target=makeTerminal('Alvo com retomada');repository.saveTerminal(source);repository.saveTerminal(target);const now=new Date().toISOString();
+    repository.controlRules=[{id:crypto.randomUUID(),name:'Pausar pelo último ciclo',sortOrder:10,enabled:true,sourceTerminalId:source.id,targetTerminalId:target.id,metric:'lastCycleLossCount',operator:'GT',value:2,referenceMetric:null,action:'PAUSE',resumeMetric:'currentLossStreak',resumeOperator:'GTE',resumeValue:1,resumeReferenceMetric:null,createdAt:now,updatedAt:now}];
+    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();manager.getRuntime(source.id)!.galeRuntime.lastCycleLossCount=3;
+    for(const multiplier of[1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(manager.getRuntime(target.id)?.status).toBe('PAUSED');
+    for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(manager.getRuntime(source.id)?.resultAnalyzerState.currentLossStreak).toBe(1);
+    expect(manager.getRuntime(target.id)?.status).toBe('RUNNING');expect(manager.getRuntime(target.id)?.pauseState.type).toBe('NONE');
+  });
+
   it('uses only the last LOSS block between WIN signals as dynamic N',async()=>{
     const repository=new MemoryRepository();const terminal=makeTerminal('Dinâmico N4');repository.saveTerminal(terminal);
     repository.betStrategyConfig={rules:[{id:'dynamic-n',name:'Último bloco LOSS',enabled:true,priority:1,conditions:[{field:'currentLossStreak',operator:'EQ',referenceField:'lastClosedLossStreak'}],action:'ENTER'}]};
     const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
     // Estado equivalente a W-L-L-L-L-W: último bloco encerrado possui N=4.
     const runtime=manager.getRuntime(terminal.id)!;runtime.resultAnalyzerState.lastClosedLossStreak=4;runtime.resultAnalyzerState.lastResult='WIN';runtime.resultAnalyzerState.recentPattern='WLLLLW';
-    // L1, L2 e L3 não são aposta; ao fim de L3 a BASE fica armada para L4.
+    // L1, L2 e L3 não são aposta e ainda não completaram o alvo N=4.
     for(const multiplier of[1.72,1.25,2.27,1.25,2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
     expect(repository.stages).toHaveLength(0);
     expect(manager.getRuntime(terminal.id)?.resultAnalyzerState.currentLossStreak).toBe(3);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.active).toBe(false);
+    // O quarto LOSS completa a condição e arma a BASE para o sinal seguinte.
+    for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.stages).toHaveLength(0);
     expect(manager.getRuntime(terminal.id)?.galeRuntime).toMatchObject({active:true,currentStage:0,triggerLossStreakTarget:4});
-    // O quarto LOSS é a própria BASE, não apenas o preparador da rodada seguinte.
     for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
     expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS']);
   });
 
-  it('uses the previous LOSS streak as N, places BASE on LN and keeps WIN bets until LOSS',async()=>{
+  it('uses the previous LOSS streak as N, places BASE after LN and keeps WIN bets until LOSS',async()=>{
     const repository=new MemoryRepository();const terminal=makeTerminal('Entrada no terceiro LOSS');terminal.betStrategyWinId=crypto.randomUUID();terminal.betStrategyLossId=crypto.randomUUID();repository.saveTerminal(terminal);
     repository.betStrategyConfigs.set(terminal.betStrategyLossId,{rules:[{id:'dynamic-three',name:'Entrada no terceiro LOSS',enabled:true,priority:1,conditions:[{field:'currentLossStreak',operator:'EQ',referenceField:'lastClosedLossStreak'}],action:'ENTER',betPlanId:terminal.betPlanLossId}]});
     repository.betStrategyConfigs.set(terminal.betStrategyWinId,{rules:[{id:'continue-win',name:'Continuar WIN atÃ© LOSS',enabled:true,priority:1,conditions:[{field:'lastClosedWinStreak',operator:'GT',value:99}],action:'ENTER',betPlanId:terminal.betPlanWinId,onWinBetPlanId:terminal.betPlanWinId,onWinPlanBehavior:'REPEAT_UNTIL_LOSS'}]});
@@ -275,22 +297,24 @@ describe('TerminalManager', () => {
     for(const multiplier of[1.72,1.25,2.27,1.25,2.27,1.25,2.27,2.5,2.27,1.25,2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
     expect(manager.getRuntime(terminal.id)?.resultAnalyzerState).toMatchObject({currentLossStreak:2,lastClosedLossStreak:3});
     expect(repository.stages).toHaveLength(0);
-    expect(manager.getRuntime(terminal.id)?.galeRuntime).toMatchObject({active:true,currentStage:0,triggerLossStreakTarget:3});
-    // N=3: depois de L1 e L2, o terceiro LOSS é BASE; o WIN seguinte é G1.
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.active).toBe(false);
+    // N=3: o terceiro LOSS arma a BASE; o WIN seguinte liquida essa BASE.
     for(const multiplier of[2.5,1.25,2.5,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
-    expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS','GALE 1:WIN']);
+    expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:WIN']);
 
     // Os WIN seguintes continuam apostados; o primeiro LOSS tambÃ©m Ã© liquidado
     // como aposta e encerra o ciclo. O bloco anterior teve 3 L entre W, então N=3.
     for(const multiplier of[2.5,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
-    expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS','GALE 1:WIN','BASE:WIN','BASE:LOSS']);
+    expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:WIN','BASE:WIN','BASE:LOSS']);
     expect(manager.getRuntime(terminal.id)?.resultAnalyzerState).toMatchObject({currentLossStreak:1,lastClosedLossStreak:3});
     expect(manager.getRuntime(terminal.id)?.galeRuntime.active).toBe(false);
 
-    // O LOSS que encerrou o ciclo já vale como L1. L2 não é aposta e arma L3.
+    // O LOSS que encerrou o ciclo já vale como L1. L2 não arma; L3 arma a BASE seguinte.
     await manager.routeRoundToTerminals(makeRound(2.27));
     await manager.routeRoundToTerminals(makeRound(1.25));
-    expect(repository.stages).toHaveLength(4);
+    expect(repository.stages).toHaveLength(3);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.active).toBe(false);
+    for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
     expect(manager.getRuntime(terminal.id)?.galeRuntime).toMatchObject({active:true,currentStage:0,triggerLossStreakTarget:3});
     for(const multiplier of[2.27,1.25,2.27,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
     expect(repository.stages.slice(-2).map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS','GALE 1:WIN']);
@@ -303,6 +327,9 @@ describe('TerminalManager', () => {
     // A sequÃªncia anterior fecha com dois LOSS; logo o alvo seguinte passa a N=2.
     for(const multiplier of[1.72,1.25,2.27,1.25,2.27,2.5,2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
     expect(manager.getRuntime(terminal.id)?.resultAnalyzerState).toMatchObject({currentLossStreak:1,lastClosedLossStreak:2});
+    expect(repository.stages).toHaveLength(0);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.active).toBe(false);
+    for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
     expect(repository.stages).toHaveLength(0);
     expect(manager.getRuntime(terminal.id)?.galeRuntime).toMatchObject({active:true,triggerLossStreakTarget:2});
     for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));

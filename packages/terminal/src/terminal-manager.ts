@@ -100,6 +100,24 @@ export class TerminalManager {
 
   getRuntime(id: string): TerminalRuntime | null { return this.runtimes.get(id) ?? null; }
   getRuntimes(): TerminalRuntime[] { return [...this.runtimes.values()]; }
+  synchronizeTerminal(id:string):boolean{
+    const terminal=this.repository.getTerminal(id);const runtime=this.runtimes.get(id);if(!terminal||!runtime)return false;
+    if(runtime.galeRuntime.active){
+      const planId=runtime.galeRuntime.activeBetPlanId??terminal.betPlanId;
+      runtime.galeRuntime.preparedLegAmountsCents=resolveStageAmounts(runtime,this.repository.getBetPlanConfig(planId),runtime.galeRuntime.currentStage);
+      runtime.gameStrategyRuntime.state='WAIT_RESULT';
+    }else{
+      runtime.gameStrategyRuntime.state='SEARCH_TRIGGER';
+      runtime.gameStrategyRuntime.triggerRoundId=null;
+      runtime.gameStrategyRuntime.releaseProgress=0;
+    }
+    runtime.updatedAt=new Date().toISOString();this.repository.saveTerminalRuntime(runtime);
+    this.unsubscribeByTerminal.get(id)?.();this.unsubscribeByTerminal.delete(id);
+    if(runtime.status==='RUNNING'||this.isControlRulePause(runtime))this.attach(terminal);
+    const controlSources=new Set(this.repository.listTerminalControlRules().filter(rule=>rule.enabled&&rule.targetTerminalId===id).map(rule=>rule.sourceTerminalId));
+    for(const sourceId of controlSources)this.evaluateControlRules(sourceId);
+    return true;
+  }
   setAssistedPreparationHandler(handler: (request: {terminalId:string;deliveryMode:NormalizedRound['deliveryMode'];stageIndex:number;betPlanId:string;amountsCents:number[]}) => void | Promise<void>) { this.assistedPreparationHandler = handler; }
   setScreenControllerState(id: string, status: TerminalRuntime['screenControllerState']['status']) {
     const runtime = this.runtimes.get(id); if (!runtime) return;
@@ -256,17 +274,6 @@ export class TerminalManager {
         const betConfig = this.repository.getBetStrategyConfig(selectedBetStrategyId);
         if (betConfig) {
           let decision = this.betStrategyEngine.decide({ terminalId, betStrategyId: selectedBetStrategyId, config: betConfig, signal: result.signal, analyzer: runtime.resultAnalyzerState, bankrollCents: runtime.bankrollState.currentBalanceCents });
-          if(result.signal.result==='LOSS'&&!runtime.galeRuntime.active){
-            const target=runtime.galeRuntime.triggerLossStreakTarget??runtime.resultAnalyzerState.lastClosedLossStreak;
-            const progress=runtime.galeRuntime.triggerLossProgress??0;
-            const canArmNext=target>0&&progress>=Math.max(0,target-1);
-            const projectedAnalyzer={...runtime.resultAnalyzerState,currentLossStreak:canArmNext?target:progress,lastClosedLossStreak:target};
-            const projectedDecision=this.betStrategyEngine.decide({terminalId,betStrategyId:selectedBetStrategyId,config:betConfig,signal:result.signal,analyzer:projectedAnalyzer,bankrollCents:runtime.bankrollState.currentBalanceCents});
-            const projectedRule=betConfig.rules.find(rule=>rule.id===projectedDecision.ruleId);
-            const dynamicLossEntry=canArmNext&&projectedRule?.action==='ENTER'&&projectedRule.conditions.some(condition=>condition.field==='currentLossStreak'&&condition.referenceField==='lastClosedLossStreak');
-            if(dynamicLossEntry)decision={...projectedDecision,metadata:{...projectedDecision.metadata,analyzer:runtime.resultAnalyzerState,prospectiveLossEntry:true,triggerLossStreakTarget:target,observedLossProgress:runtime.galeRuntime.triggerLossProgress}};
-            else if(betConfig.rules.some(rule=>rule.enabled&&rule.conditions.some(condition=>condition.field==='currentLossStreak'&&condition.referenceField==='lastClosedLossStreak')))decision={...decision,action:'IGNORE',ruleId:null,metadata:{...decision.metadata,triggerLossStreakTarget:target,observedLossProgress:runtime.galeRuntime.triggerLossProgress}};
-          }
           if(decision.action==='IGNORE'&&result.signal.result==='WIN'&&!runtime.galeRuntime.active){
             // Para que o segundo WIN seja uma aposta, a condiÃ§Ã£o W2 precisa ser
             // antecipada ao fim do W1, quando ainda hÃ¡ tempo de preparar o clique.
@@ -297,7 +304,7 @@ export class TerminalManager {
             const onWinBetPlanId = configuredOnWinPlanId&&this.repository.getBetPlanConfig(configuredOnWinPlanId) ? configuredOnWinPlanId : null;
             const followUpBehavior = decision.metadata.onWinPlanBehavior === 'REPEAT_UNTIL_LOSS'||winContinuationRule?.onWinPlanBehavior==='REPEAT_UNTIL_LOSS' ? 'REPEAT_UNTIL_LOSS' : 'RUN_ONCE';
             const matchedRule=betConfig.rules.find(rule=>rule.id===decision.ruleId);
-            const triggerLossStreakTarget=matchedRule?.conditions.some(condition=>condition.field==='currentLossStreak'&&condition.referenceField==='lastClosedLossStreak')?(Number(decision.metadata.triggerLossStreakTarget)||runtime.galeRuntime.triggerLossStreakTarget||runtime.resultAnalyzerState.lastClosedLossStreak):runtime.galeRuntime.triggerLossStreakTarget??null;
+            const triggerLossStreakTarget=matchedRule?.conditions.some(condition=>condition.field==='currentLossStreak'&&condition.referenceField==='lastClosedLossStreak')?(runtime.resultAnalyzerState.lastClosedLossStreak||null):runtime.galeRuntime.triggerLossStreakTarget??null;
             runtime.galeRuntime = { active: true, currentStage: 0, cycleId: randomUUID(), activeBetPlanId, onWinBetPlanId, followUp: false, followUpBehavior, triggerLossStreakTarget,triggerLossProgress:runtime.galeRuntime.triggerLossProgress??0,currentCycleWinCount:0,currentCycleLossCount:0,lastCycleWinCount:runtime.galeRuntime.lastCycleWinCount??0,lastCycleLossCount:runtime.galeRuntime.lastCycleLossCount??0 };
             if(decision.metadata.prospectiveWinEntry===true){runtime.gameStrategyRuntime.state='WAIT_RESULT';runtime.gameStrategyRuntime.triggerRoundId=result.signal.resultRoundId;}
             const amountsCents=resolveStageAmounts(runtime,this.repository.getBetPlanConfig(activeBetPlanId),0);runtime.galeRuntime.preparedLegAmountsCents=amountsCents;
@@ -317,7 +324,7 @@ export class TerminalManager {
 
   private evaluateControlRules(sourceTerminalId:string){
     const all=this.repository.listTerminalControlRules().filter(rule=>rule.enabled);const affected=new Set(all.filter(rule=>rule.sourceTerminalId===sourceTerminalId).map(rule=>rule.targetTerminalId));
-    for(const targetId of affected){const runtime=this.runtimes.get(targetId);if(!runtime||runtime.pauseState.type==='MANUAL')continue;const current=runtime.pauseState.ruleId?all.find(rule=>rule.id===runtime.pauseState.ruleId):undefined;if(current?.action==='PAUSE'&&current.resumeMetric&&current.resumeOperator&&current.resumeValue!=null){const source=this.runtimes.get(current.sourceTerminalId);if(source&&!compareControlValue(controlMetricValueByName(current.resumeMetric,source),current.resumeOperator,current.resumeReferenceMetric?controlMetricValueByName(current.resumeReferenceMetric,source):current.resumeValue))continue;}
+    for(const targetId of affected){const runtime=this.runtimes.get(targetId);if(!runtime||runtime.pauseState.type==='MANUAL')continue;const current=runtime.pauseState.ruleId?all.find(rule=>rule.id===runtime.pauseState.ruleId):undefined;if(current?.action==='PAUSE'&&current.resumeMetric&&current.resumeOperator&&current.resumeValue!=null){const source=this.runtimes.get(current.sourceTerminalId);const shouldResume=source&&compareControlValue(controlMetricValueByName(current.resumeMetric,source),current.resumeOperator,current.resumeReferenceMetric?controlMetricValueByName(current.resumeReferenceMetric,source):current.resumeValue);if(shouldResume)this.applyRuleResume(targetId);continue;}
       const pause=all.filter(rule=>rule.targetTerminalId===targetId&&rule.action==='PAUSE').find(rule=>{const source=this.runtimes.get(rule.sourceTerminalId);return source&&compareControlValue(controlMetricValue(rule,source),rule.operator,rule.referenceMetric?controlMetricValueByName(rule.referenceMetric,source):rule.value)});if(pause){this.applyRulePause(targetId,pause);continue;}
       const legacyResume=all.filter(rule=>rule.targetTerminalId===targetId&&rule.action==='RESUME').find(rule=>{const source=this.runtimes.get(rule.sourceTerminalId);return source&&compareControlValue(controlMetricValue(rule,source),rule.operator,rule.referenceMetric?controlMetricValueByName(rule.referenceMetric,source):rule.value)});if((current?.resumeMetric&&current.resumeOperator&&current.resumeValue!=null)||legacyResume)this.applyRuleResume(targetId);
     }

@@ -9,6 +9,7 @@ declare global {
       logout(): Promise<ApiResult<boolean>>;
       createTerminal(input: unknown): Promise<ApiResult<Terminal>>;
       updateTerminal(input: unknown): Promise<ApiResult<Terminal>>;
+      syncTerminal(id:string):Promise<ApiResult<boolean>>;
       duplicateTerminal(id: string): Promise<ApiResult<Terminal>>;
       deleteTerminal(id: string): Promise<ApiResult<boolean>>;
       resetTerminal(id:string,mode:'FINANCIAL'|'FULL'):Promise<ApiResult<boolean>>;

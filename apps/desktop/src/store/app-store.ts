@@ -12,6 +12,7 @@ interface AppState extends Omit<BootstrapData, 'session'> {
   refresh(): Promise<void>;
   createTerminal(input: unknown): Promise<boolean>;
   updateTerminal(input: unknown): Promise<boolean>;
+  syncTerminal(id:string):Promise<boolean>;
   duplicateTerminal(id: string): Promise<boolean>;
   deleteTerminal(id: string): Promise<void>;
   resetTerminal(id:string,mode:'FINANCIAL'|'FULL'):Promise<boolean>;
@@ -81,6 +82,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!result.ok) { set({ error: result.error ?? 'Não foi possível atualizar o Terminal.' }); return false; }
     await get().refresh(); return true;
   },
+  syncTerminal:async id=>{const result=await window.aviator.syncTerminal(id);if(!result.ok){set({error:result.error??'Não foi possível sincronizar o Terminal.'});return false}await get().refresh();return true},
   duplicateTerminal: async (id) => {
     const result = await window.aviator.duplicateTerminal(id);
     if (!result.ok) { set({ error: result.error ?? 'Não foi possível duplicar.' }); return false; }

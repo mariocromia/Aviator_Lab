@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { BarChart3, Bot, Clock3, Copy, Pause, Play, Plus, ReceiptText, RotateCcw, Search, Settings2, SquareTerminal, Trash2, Zap } from 'lucide-react';
+import { BarChart3, Bot, Clock3, Copy, Pause, Play, Plus, ReceiptText, RefreshCw, RotateCcw, Search, Settings2, SquareTerminal, Trash2, Zap } from 'lucide-react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { NormalizedRound, ScreenProfile, Terminal, TerminalHistoryItem, TerminalRuntime } from '@aviator/shared';
 import { Badge, Button, Card, Modal } from '@/components/ui';
@@ -18,11 +18,13 @@ export function TerminalsPage() {
   const [botTerminal, setBotTerminal] = useState<Terminal | null>(null);
   const[resettingTerminal,setResettingTerminal]=useState<Terminal|null>(null);
   const[bankrollTerminal,setBankrollTerminal]=useState<Terminal|null>(null);
+  const[syncingTerminalId,setSyncingTerminalId]=useState<string|null>(null);
   const [query, setQuery] = useState('');
   const terminals = store.terminals.filter(terminal => terminal.name.toLowerCase().includes(query.toLowerCase()));
   useEffect(()=>{if(!chartTerminal){setChartHistory([]);return}let active=true;void window.aviator.getTerminalHistory(chartTerminal.id,5000).then(result=>{if(active&&result.ok&&result.data)setChartHistory(result.data)});return()=>{active=false}},[chartTerminal?.id]);
 
   function configure(terminal: Terminal) { store.clearError(); setEditing(terminal); }
+  async function synchronize(id:string){store.clearError();setSyncingTerminalId(id);await store.syncTerminal(id);setSyncingTerminalId(null);}
 
   return <div className="p-5">
     <div className="mb-5 flex items-end justify-between">
@@ -51,6 +53,7 @@ export function TerminalsPage() {
             <div className="min-w-0"><div className="flex items-center gap-2"><h3 className="truncate text-sm font-semibold">{terminal.name}</h3><Badge tone={isPaused ? 'warning' : 'success'}>{translateTerminalStatus(runtime?.status??(terminal.paused?'PAUSED':'RUNNING'))}</Badge></div><div className="mt-1 truncate font-mono text-[9px] text-muted">ID {terminal.id}</div></div>
             <div className="ml-auto flex shrink-0 items-center gap-1 pl-3">
               <TerminalIconButton title={isPaused?'Retomar Terminal':'Pausar Terminal'} onClick={()=>void store.setTerminalPaused(terminal.id,!isPaused)} tone={isPaused?'success':'warning'}>{isPaused?<Play size={13}/>:<Pause size={13}/>}</TerminalIconButton>
+              <TerminalIconButton title="Sincronizar configurações" onClick={()=>void synchronize(terminal.id)} disabled={syncingTerminalId===terminal.id}><RefreshCw size={13} className={syncingTerminalId===terminal.id?'animate-spin':''}/></TerminalIconButton>
               <TerminalIconButton title="Duplicar Terminal" onClick={()=>void store.duplicateTerminal(terminal.id)}><Copy size={13}/></TerminalIconButton>
               <TerminalIconButton title="Excluir Terminal" onClick={()=>{if(window.confirm(`Excluir ${terminal.name}? O histórico operacional deste Terminal será removido.`))void store.deleteTerminal(terminal.id)}} tone="danger"><Trash2 size={13}/></TerminalIconButton>
               <TerminalIconButton title="Opções de reset" onClick={()=>{store.clearError();setResettingTerminal(terminal)}} tone="warning"><RotateCcw size={13}/></TerminalIconButton>
@@ -239,7 +242,7 @@ function LastRoundStat({platformId,value,indicator}:{platformId:string;value:str
   return <><div className="min-w-0 cursor-help px-3 py-3" onMouseEnter={event=>void open(event.currentTarget)} onMouseLeave={()=>setPopover(null)}><div className="label truncate">Último</div><div className="mt-1 whitespace-nowrap font-mono text-[11px] font-semibold">{value}</div>{indicator&&<div title={indicator.label} aria-label={indicator.label} className={`mt-0.5 font-mono text-[11px] font-black leading-none ${indicator.tone}`}>{indicator.symbol}</div>}</div>{popover&&createPortal(<div className="pointer-events-none fixed z-[9998] w-80 rounded-lg border border-line bg-elevated p-3 shadow-2xl" style={popover}><div className="mb-2 flex items-center justify-between"><span className="label">Últimas 15 rodadas da plataforma</span><span className="font-mono text-[9px] text-muted">MAIS RECENTE PRIMEIRO</span></div>{loading?<div className="py-4 text-center font-mono text-[10px] text-muted">CARREGANDO...</div>:rounds.length===0?<div className="py-4 text-center font-mono text-[10px] text-muted">SEM RODADAS</div>:<div className="grid grid-cols-3 gap-1.5">{rounds.map(round=><div key={round.id} className="rounded border border-line bg-canvas px-2 py-1.5"><div className={`font-mono text-[11px] font-bold ${round.multiplier>=2?'text-success':round.multiplier<1.35?'text-danger':'text-warning'}`}>{round.multiplier.toFixed(2)}x</div><div className="mt-0.5 font-mono text-[8px] text-muted">{new Date(round.occurredAt).toLocaleTimeString('pt-BR')}</div></div>)}</div>}</div>,document.body)}</>;
 }
 
-function TerminalIconButton({title,onClick,children,tone='neutral'}:{title:string;onClick():void;children:ReactNode;tone?:'neutral'|'success'|'warning'|'danger'}){const colors={neutral:'text-muted hover:bg-elevated hover:text-ink',success:'text-success hover:bg-success/10',warning:'text-warning hover:bg-warning/10',danger:'text-muted hover:bg-danger/10 hover:text-danger'};return <button type="button" title={title} aria-label={title} onClick={onClick} className={`grid h-7 w-7 place-items-center rounded-md border border-line ${colors[tone]}`}>{children}</button>}
+function TerminalIconButton({title,onClick,children,tone='neutral',disabled=false}:{title:string;onClick():void;children:ReactNode;tone?:'neutral'|'success'|'warning'|'danger';disabled?:boolean}){const colors={neutral:'text-muted hover:bg-elevated hover:text-ink',success:'text-success hover:bg-success/10',warning:'text-warning hover:bg-warning/10',danger:'text-muted hover:bg-danger/10 hover:text-danger'};return <button type="button" title={title} aria-label={title} onClick={onClick} disabled={disabled} className={`grid h-7 w-7 place-items-center rounded-md border border-line disabled:cursor-wait disabled:opacity-50 ${colors[tone]}`}>{children}</button>}
 
 function PatternDots({history}:{history:TerminalHistoryItem[]}){
   const viewport=useRef<HTMLDivElement>(null);
