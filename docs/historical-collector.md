@@ -30,3 +30,5 @@ Somente um computador deve ser configurado como coletor central para uma determi
 - `dddfce2b-42dc-4fd5-afd8-a5ee0ef36f89`: BravoBet.
 
 O backtest consulta primeiro o arquivo histórico e aceita até 300.000 rodadas. O Analista IA também usa o arquivo histórico para os cálculos de plataforma, mantendo o limite de amostra próprio da interface para controlar o volume enviado ao modelo.
+
+Ao criar, duplicar ou alterar a plataforma, estratégias ou planos de um Terminal, o aplicativo faz preload das 500 rodadas mais recentes. As bolinhas W/L, sequências, decisões, ciclos BASE/GALE, extrato e banca são recalculados cronologicamente como se o Terminal tivesse apostado com a configuração atual. Rodadas históricas são `BACKLOG`, portanto nunca acionam o bot físico. Editar uma estratégia ou plano já vinculado também atualiza automaticamente todos os Terminais afetados.

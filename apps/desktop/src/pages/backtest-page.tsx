@@ -11,8 +11,10 @@ export function BacktestPage() {
   const { platforms, gameStrategies, betStrategies, betPlans } = useAppStore();
   const [platformId, setPlatformId] = useState(platforms[0]?.id ?? '');
   const [gameStrategyId, setGameStrategyId] = useState(gameStrategies[0]?.id ?? '');
-  const [betStrategyId, setBetStrategyId] = useState(betStrategies[0]?.id ?? '');
-  const [betPlanId, setBetPlanId] = useState(betPlans[0]?.id ?? '');
+  const [betStrategyWinId, setBetStrategyWinId] = useState(betStrategies[0]?.id ?? '');
+  const [betStrategyLossId, setBetStrategyLossId] = useState(betStrategies[0]?.id ?? '');
+  const [betPlanWinId, setBetPlanWinId] = useState(betPlans[0]?.id ?? '');
+  const [betPlanLossId, setBetPlanLossId] = useState(betPlans[0]?.id ?? '');
   const [bankroll, setBankroll] = useState(1000);
   const [limit, setLimit] = useState(1000);
   const [run, setRun] = useState<BacktestRun | null>(null);
@@ -22,7 +24,7 @@ export function BacktestPage() {
 
   async function execute() {
     setRunning(true); setError(null);
-    const result = await window.aviator.runBacktest({ platformId, gameStrategyId, betStrategyId, betPlanId, initialBankrollCents: Math.round(bankroll * 100), limit });
+    const result = await window.aviator.runBacktest({ platformId, gameStrategyId, betStrategyWinId,betStrategyLossId,betPlanWinId,betPlanLossId,initialBankrollCents: Math.round(bankroll * 100), limit });
     if (result.ok && result.data) setRun(result.data); else setError(result.error ?? 'Não foi possível executar o backtest.');
     setRunning(false);
   }
@@ -30,7 +32,7 @@ export function BacktestPage() {
 
   return <div className="p-5">
     <div className="mb-5 flex items-end justify-between"><div><h2 className="text-xl font-bold">Backtest financeiro</h2><p className="mt-1 text-xs text-muted">Reprocessa o histórico cronológico com os mesmos motores usados nos Terminais.</p></div><div className="flex gap-2">{run&&<><Button onClick={()=>exportRun('csv')} className="border-line bg-panel text-muted"><Download size={13}/>CSV</Button><Button onClick={()=>exportRun('json')} className="border-line bg-panel text-muted"><Download size={13}/>JSON</Button></>}<Button onClick={() => void execute()} disabled={running || !platformId} className="bg-brand text-white"><Play size={14}/>{running ? 'Processando...' : 'Executar backtest'}</Button></div></div>
-    <Card className="mb-3 grid grid-cols-2 gap-3 p-4 xl:grid-cols-6"><Select label="Plataforma" value={platformId} onChange={setPlatformId} options={platforms}/><Select label="Estratégia de jogo" value={gameStrategyId} onChange={setGameStrategyId} options={gameStrategies}/><Select label="Estratégia de entrada" value={betStrategyId} onChange={setBetStrategyId} options={betStrategies}/><Select label="Estratégia de aposta" value={betPlanId} onChange={setBetPlanId} options={betPlans}/><NumberField label="Banca inicial (R$)" value={bankroll} onChange={setBankroll}/><NumberField label="Rodadas" value={limit} onChange={setLimit}/></Card>
+    <Card className="mb-3 grid grid-cols-2 gap-3 p-4 xl:grid-cols-4"><Select label="Plataforma" value={platformId} onChange={setPlatformId} options={platforms}/><Select label="Estratégia de jogo" value={gameStrategyId} onChange={setGameStrategyId} options={gameStrategies}/><NumberField label="Banca inicial (R$)" value={bankroll} onChange={setBankroll}/><NumberField label="Rodadas" value={limit} onChange={setLimit}/><Select label="Entrada após WIN" value={betStrategyWinId} onChange={setBetStrategyWinId} options={betStrategies}/><Select label="Aposta após WIN" value={betPlanWinId} onChange={setBetPlanWinId} options={betPlans}/><Select label="Entrada após LOSS" value={betStrategyLossId} onChange={setBetStrategyLossId} options={betStrategies}/><Select label="Aposta após LOSS" value={betPlanLossId} onChange={setBetPlanLossId} options={betPlans}/></Card>
     {error && <div className="mb-3 rounded-md border border-danger/30 bg-danger/10 p-3 text-xs text-red-200">{error}</div>}
     {!run ? <Card className="grid min-h-[360px] place-items-center p-8 text-center"><div><Activity className="mx-auto text-muted" size={34}/><div className="mt-3 text-sm font-semibold">Pronto para simular</div><p className="mt-1 text-xs text-muted">Selecione os componentes e execute sobre as rodadas persistidas.</p></div></Card> : <>
       {run.report.stoppedByLimit&&<div className="mb-3 rounded-md border border-warning/30 bg-warning/10 p-3 text-xs text-warning">Simulação interrompida/protegida: {run.report.stoppedByLimit}</div>}<div className="mb-3 grid grid-cols-2 gap-3 xl:grid-cols-8"><Metric label="Lucro líquido" value={money(run.report.profitCents)} icon={run.report.profitCents >= 0 ? TrendingUp : TrendingDown} tone={run.report.profitCents >= 0 ? 'text-success' : 'text-danger'}/><Metric label="ROI" value={`${run.report.roi.toFixed(2)}%`} icon={TrendingUp}/><Metric label="Taxa de WIN" value={`${run.report.winRate.toFixed(1)}%`} icon={TrendingUp}/><Metric label="Média / entrada" value={money(run.report.averageProfitPerEntryCents)} icon={Banknote}/><Metric label="Banca final" value={money(run.report.finalBankrollCents)} icon={Banknote}/><Metric label="Drawdown máx." value={money(run.report.maxDrawdownCents)} icon={TrendingDown}/><Metric label="Entradas" value={String(run.report.betEntries)} icon={Activity}/><Metric label="Exposição máx." value={money(run.report.maximumExposureCents)} icon={Banknote}/></div>

@@ -14,6 +14,7 @@ describe('terminal factory', () => {
     expect(terminal.currentBankrollCents).toBe(10_000);
     expect(terminal.gameWins).toBe(0);
     expect(terminal.gameLosses).toBe(0);
+    expect(terminal.historyDisplayLimit).toBe(200);
   });
 
   it('duplicates configuration but never operational state or identity', () => {
@@ -21,7 +22,7 @@ describe('terminal factory', () => {
       name: 'Terminal Alpha', platformId: crypto.randomUUID(),
       gameStrategyId: crypto.randomUUID(), betStrategyId: crypto.randomUUID(),
       betPlanId: crypto.randomUUID(), screenProfileId: null,
-      mode: 'SIMULATION', enabled: true, paused: false, initialBankrollCents: 25_000
+      mode: 'SIMULATION', enabled: true, paused: false, historyDisplayLimit:200,operationCombinations:[{id:'llw',name:'LLW',priority:10,enabled:true,betStrategyId:crypto.randomUUID(),betPlanId:crypto.randomUUID(),behavior:'REPEAT_UNTIL_LOSS'}], initialBankrollCents: 25_000
     }, crypto.randomUUID(), now);
     source.currentBankrollCents = 31_400;
     source.gameWins = 12;
@@ -31,5 +32,8 @@ describe('terminal factory', () => {
     expect(copy.currentBankrollCents).toBe(25_000);
     expect(copy.gameWins).toBe(0);
     expect(copy.paused).toBe(true);
+    expect(copy.historyDisplayLimit).toBe(200);
+    expect(copy.operationCombinations).toEqual(source.operationCombinations);
+    expect(copy.operationCombinations).not.toBe(source.operationCombinations);
   });
 });

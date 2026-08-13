@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage,
 import path from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { aiChatRequestSchema, aiSettingsInputSchema, auditQuerySchema, backtestRequestSchema, configurationActionSchema, createPlatformInputSchema, createTerminalInputSchema, loginInputSchema, recentRoundsQuerySchema, recoverySnapshotIdSchema, resetTerminalInputSchema, saveConfigurationSchema, saveScreenProfileInputSchema, saveTerminalControlRuleInputSchema, screenCoordinateTestSchema, screenProfileActionSchema, setPlatformEnabledInputSchema, setTerminalSchedulePlanInputSchema, terminalControlRuleIdSchema, terminalHistoryQuerySchema, terminalIdSchema, testPlatformInputSchema, updatePlatformInputSchema, updateTerminalBankrollInputSchema, updateTerminalInputSchema, workspaceArchiveSchema, type AiChatResponse, type AiModelOption, type AiSettingsView, type ApiResult, type AuditRecord, type BacktestRun, type ConfigurationDocument, type ConfigurationKind, type PerformanceBenchmarkResult, type Platform, type PlatformTestResult, type RecoverySnapshot, type RoundArchiveStatus, type ScreenCaptureResult, type ScreenMockRun, type ScreenProfile, type ScreenProfileValidation, type SystemDiagnostics, type Terminal, type TerminalControlRule, type UserSession } from '@aviator/shared';
+import { aiChatRequestSchema, aiSettingsInputSchema, auditQuerySchema, backtestRequestSchema, configurationActionSchema, createPlatformInputSchema, createTerminalInputSchema, loginInputSchema, recentRoundsQuerySchema, recoverySnapshotIdSchema, resetTerminalInputSchema, saveConfigurationSchema, saveScreenProfileInputSchema, saveTerminalControlRuleInputSchema, saveTerminalPresetSchema, screenCoordinateTestSchema, screenProfileActionSchema, setPlatformEnabledInputSchema, setTerminalSchedulePlanInputSchema, terminalControlRuleIdSchema, terminalHistoryQuerySchema, terminalIdSchema, terminalPresetIdSchema, testPlatformInputSchema, updatePlatformInputSchema, updateTerminalBankrollInputSchema, updateTerminalInputSchema, workspaceArchiveSchema, type AiChatResponse, type AiModelOption, type AiSettingsView, type ApiResult, type AuditRecord, type BacktestRun, type ConfigurationDocument, type ConfigurationKind, type PerformanceBenchmarkResult, type Platform, type PlatformTestResult, type RecoverySnapshot, type RoundArchiveStatus, type ScreenCaptureResult, type ScreenMockRun, type ScreenProfile, type ScreenProfileValidation, type SystemDiagnostics, type Terminal, type TerminalControlRule, type TerminalPreset, type UserSession } from '@aviator/shared';
 import { TerminalManager } from '@aviator/terminal';
 import { SimulationEngine } from '@aviator/simulator';
 import { MockScreenController, validateScreenProfile } from '@aviator/screen-controller';
@@ -222,6 +222,12 @@ function registerIpc() {
     BrowserWindow.fromWebContents(event.sender)?.webContents.setZoomFactor(scale);
     return success(scale);
   });
+  ipcMain.handle('display:terminal-history-max:get',():ApiResult<number>=>success(getTerminalHistoryDisplayMax()));
+  ipcMain.handle('display:terminal-history-max:set',(_event,raw):ApiResult<number>=>{
+    const value=Number(raw);
+    if(!Number.isInteger(value)||value<10||value>500)return failure('Quantidade de bolinhas inválida.');
+    database.setAppSetting('terminal_history_display_max',value);notifyDataChanged();return success(value);
+  });
   ipcMain.handle('auth:login', (_event, raw): ApiResult<UserSession> => {
     const parsed = loginInputSchema.safeParse(raw);
     if (!parsed.success) return failure('Dados de acesso inválidos.');
@@ -232,29 +238,37 @@ function registerIpc() {
   ipcMain.handle('terminal:create', (_event, raw): ApiResult<Terminal> => {
     const parsed = createTerminalInputSchema.safeParse(raw);
     if (!parsed.success) return failure('Configuração do Terminal inválida.');
-    const value = parsed.data;
-    const terminal = terminalManager.createTerminal({ ...value, screenProfileId: null, enabled: true, paused: false });
-    return success(terminal);
+    const value = {...parsed.data,historyDisplayLimit:Math.min(parsed.data.historyDisplayLimit,getTerminalHistoryDisplayMax())};
+    try{const terminal = terminalManager.createTerminal({ ...value, screenProfileId: null, enabled: true, paused: false });preloadTerminalHistory(terminal.id);return success(terminal);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível criar o Terminal.');}
   });
   ipcMain.handle('terminal:duplicate', (_event, raw): ApiResult<Terminal> => {
     const parsed = terminalIdSchema.safeParse(raw);
     if (!parsed.success) return failure('Terminal não encontrado.');
     const copy = terminalManager.duplicateTerminal(parsed.data);
     if (!copy) return failure('Terminal não encontrado.');
+    preloadTerminalHistory(copy.id);
     return success(copy);
   });
+  ipcMain.handle('terminal-preset:save',(_event,raw):ApiResult<TerminalPreset>=>{const parsed=saveTerminalPresetSchema.safeParse(raw);if(!parsed.success)return failure('Nome ou Terminal inválido.');try{const preset=database.saveTerminalPreset(parsed.data.terminalId,parsed.data.name);notifyDataChanged();return success(preset);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível salvar a configuração.');}});
+  ipcMain.handle('terminal-preset:list',():ApiResult<TerminalPreset[]>=>success(database.listTerminalPresets()));
+  ipcMain.handle('terminal-preset:restore',(_event,raw):ApiResult<Terminal>=>{const parsed=terminalPresetIdSchema.safeParse(raw);if(!parsed.success)return failure('Configuração salva inválida.');try{const restored=database.restoreTerminalPresetConfigurations(parsed.data);const terminal=terminalManager.createTerminal(restored.draft);if(restored.schedulePlanId)database.setTerminalSchedulePlan(terminal.id,restored.schedulePlanId);if(restored.screenProfile){database.saveScreenProfile({...restored.screenProfile,id:randomUUID(),terminalId:terminal.id,name:`${terminal.name} • Bot`,updatedAt:new Date().toISOString()});}preloadTerminalHistory(terminal.id);notifyDataChanged();return success(database.getTerminal(terminal.id)??terminal);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível restaurar o Terminal.');}});
+  ipcMain.handle('terminal-preset:delete',(_event,raw):ApiResult<boolean>=>{const parsed=terminalPresetIdSchema.safeParse(raw);if(!parsed.success)return failure('Configuração salva inválida.');database.deleteTerminalPreset(parsed.data);notifyDataChanged();return success(true);});
   ipcMain.handle('terminal:update', (_event, raw): ApiResult<Terminal> => {
     const parsed = updateTerminalInputSchema.safeParse(raw);
     if (!parsed.success) return failure(`Configuração do Terminal inválida: ${parsed.error.issues.map(issue=>`${issue.path.join('.')}: ${issue.message}`).join('; ')}`);
-    const { id, ...update } = parsed.data;
-    const terminal = terminalManager.updateTerminal(id, update);
+    const { id, ...rawUpdate } = parsed.data;
+    const update={...rawUpdate,historyDisplayLimit:Math.min(rawUpdate.historyDisplayLimit,getTerminalHistoryDisplayMax())};
+    const previous=database.getTerminal(id);
+    let terminal:Terminal|null;try{terminal = terminalManager.updateTerminal(id, update);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível atualizar o Terminal.');}
     if (!terminal) return failure('Terminal não encontrado.');
+    if(previous&&terminalAnalysisConfigurationChanged(previous,terminal))preloadTerminalTree(id);
     notifyDataChanged();
     return success(terminal);
   });
   ipcMain.handle('terminal:sync',(_event,raw):ApiResult<boolean>=>{
     const parsed=terminalIdSchema.safeParse(raw);
-    if(!parsed.success||!terminalManager.synchronizeTerminal(parsed.data))return failure('Terminal não encontrado.');
+    if(!parsed.success||!database.getTerminal(parsed.data))return failure('Terminal não encontrado.');
+    preloadTerminalTree(parsed.data);
     notifyDataChanged();return success(true);
   });
   ipcMain.handle('terminal:set-paused', (_event, raw): ApiResult<boolean> => {
@@ -264,8 +278,8 @@ function registerIpc() {
     return success(true);
   });
   ipcMain.handle('terminal:set-schedule-plan',(_event,raw):ApiResult<boolean>=>{const parsed=setTerminalSchedulePlanInputSchema.safeParse(raw);if(!parsed.success)return failure('Plano de horários inválido.');database.setTerminalSchedulePlan(parsed.data.terminalId,parsed.data.schedulePlanId);notifyDataChanged();return success(true);});
-  ipcMain.handle('terminal-control-rule:save',(_event,raw):ApiResult<TerminalControlRule>=>{const parsed=saveTerminalControlRuleInputSchema.safeParse(raw);if(!parsed.success)return failure(parsed.error.issues.map(issue=>issue.message).join(' '));const rule=database.saveTerminalControlRule(parsed.data);notifyDataChanged();return success(rule);});
-  ipcMain.handle('terminal-control-rule:delete',(_event,raw):ApiResult<boolean>=>{const parsed=terminalControlRuleIdSchema.safeParse(raw);if(!parsed.success)return failure('Regra inválida.');database.deleteTerminalControlRule(parsed.data);notifyDataChanged();return success(true);});
+  ipcMain.handle('terminal-control-rule:save',(_event,raw):ApiResult<TerminalControlRule>=>{const parsed=saveTerminalControlRuleInputSchema.safeParse(raw);if(!parsed.success)return failure(parsed.error.issues.map(issue=>issue.message).join(' '));const rule=database.saveTerminalControlRule(parsed.data);for(const terminal of database.listTerminals())if(terminal.controlPlayRuleIds.includes(rule.id)||terminal.controlPauseRuleIds.includes(rule.id))preloadTerminalTree(terminal.id);notifyDataChanged();return success(rule);});
+  ipcMain.handle('terminal-control-rule:delete',(_event,raw):ApiResult<boolean>=>{const parsed=terminalControlRuleIdSchema.safeParse(raw);if(!parsed.success)return failure('Regra inválida.');const affected=database.listTerminals().filter(terminal=>terminal.controlPlayRuleIds.includes(parsed.data)||terminal.controlPauseRuleIds.includes(parsed.data)).map(terminal=>terminal.id);database.deleteTerminalControlRule(parsed.data);for(const terminalId of affected)preloadTerminalHistory(terminalId);notifyDataChanged();return success(true);});
   ipcMain.handle('screen-profile:save', (_event, raw): ApiResult<ScreenProfile> => {
     const parsed = saveScreenProfileInputSchema.safeParse(raw);
     if (!parsed.success || !database.getTerminal(parsed.data.terminalId)) return failure('Configuração do bot inválida.');
@@ -393,11 +407,13 @@ function registerIpc() {
     const archivedRounds = archiveDatabase.getRounds(request.platformId, request.limit, true);
     const rounds = archivedRounds.length >= Math.min(10, request.limit) ? archivedRounds : database.getBacktestRounds(request.platformId, request.limit);
     const gameStrategy = database.getGameStrategyConfig(request.gameStrategyId);
-    const betStrategy = database.getBetStrategyConfig(request.betStrategyId);
-    const betPlan = database.getBetPlanConfig(request.betPlanId);
-    if (!gameStrategy || !betStrategy || !betPlan) return failure('Estratégia ou plano de aposta não encontrado.');
+    const betStrategyWin = database.getBetStrategyConfig(request.betStrategyWinId);
+    const betStrategyLoss = database.getBetStrategyConfig(request.betStrategyLossId);
+    const betPlanWin = database.getBetPlanConfig(request.betPlanWinId);
+    const betPlanLoss = database.getBetPlanConfig(request.betPlanLossId);
+    if (!gameStrategy || !betStrategyWin || !betStrategyLoss || !betPlanWin || !betPlanLoss) return failure('Estratégia ou plano de aposta não encontrado.');
     if (rounds.length < 10) return failure('São necessárias pelo menos 10 rodadas para executar o backtest.');
-    const run = new SimulationEngine().run({ rounds, gameStrategyId: request.gameStrategyId, gameStrategy, betStrategyId: request.betStrategyId, betStrategy, betPlan, initialBankrollCents: request.initialBankrollCents });
+    const run = new SimulationEngine().run({ rounds, gameStrategyId: request.gameStrategyId, gameStrategy, betStrategyWinId:request.betStrategyWinId,betStrategyLossId:request.betStrategyLossId,betStrategyWin,betStrategyLoss,betPlanWin,betPlanLoss,initialBankrollCents: request.initialBankrollCents });
     database.logEvent('BACKTEST', 'INFO', 'BACKTEST_COMPLETED', { platformId: request.platformId, rounds: rounds.length, profitCents: run.report.profitCents, roi: run.report.roi });
     return success(run);
   });
@@ -423,7 +439,7 @@ function registerIpc() {
   ipcMain.handle('archive:publish', async (): Promise<ApiResult<RoundArchiveStatus>> => { try { await archiveSync.publish(); return success({ ...archiveSync.status(), backgroundEnabled: backgroundCollectorEnabled() }); } catch(error) { return failure(error instanceof Error?error.message:'Falha ao publicar o histórico.'); } });
   ipcMain.handle('archive:import', async (): Promise<ApiResult<{ inserted:number; status:RoundArchiveStatus }>> => { try { const inserted=await archiveSync.importLatest(); return success({inserted,status:{...archiveSync.status(),backgroundEnabled:backgroundCollectorEnabled()}}); } catch(error) { return failure(error instanceof Error?error.message:'Falha ao importar o histórico.'); } });
   ipcMain.handle('archive:background', (_event, raw): ApiResult<RoundArchiveStatus> => { const enabled=Boolean(raw?.enabled);database.setAppSetting('background_collector_enabled',enabled);configureBackgroundStartup();return success({...archiveSync.status(),backgroundEnabled:enabled}); });
-  ipcMain.handle('system:benchmark',():ApiResult<PerformanceBenchmarkResult[]>=>{const terminal=database.listTerminals()[0];if(!terminal)return failure('Cadastre ao menos um Terminal.');const rounds=database.getRecentRounds(terminal.platformId,500).reverse();if(rounds.length<10)return failure('São necessárias ao menos 10 rodadas persistidas.');const gameStrategy=database.getGameStrategyConfig(terminal.gameStrategyId);const betStrategy=database.getBetStrategyConfig(terminal.betStrategyId);const betPlan=database.getBetPlanConfig(terminal.betPlanId);if(!gameStrategy||!betStrategy||!betPlan)return failure('Configuração do Terminal inválida.');const engine=new SimulationEngine();const results=[10,20,50,100].map(terminalCount=>{const started=performance.now();for(let index=0;index<terminalCount;index++)engine.run({rounds,gameStrategyId:terminal.gameStrategyId,gameStrategy,betStrategyId:terminal.betStrategyId,betStrategy,betPlan,initialBankrollCents:terminal.initialBankrollCents});const durationMs=Math.max(.01,performance.now()-started);const totalEvaluations=terminalCount*rounds.length;return{terminalCount,roundsPerTerminal:rounds.length,totalEvaluations,durationMs,evaluationsPerSecond:Math.round(totalEvaluations/durationMs*1000)}});database.logEvent('SYSTEM','INFO','PERFORMANCE_BENCHMARK_FINISHED',{results});return success(results);});
+  ipcMain.handle('system:benchmark',():ApiResult<PerformanceBenchmarkResult[]>=>{const terminal=database.listTerminals()[0];if(!terminal)return failure('Cadastre ao menos um Terminal.');const rounds=database.getRecentRounds(terminal.platformId,500).reverse();if(rounds.length<10)return failure('São necessárias ao menos 10 rodadas persistidas.');const gameStrategy=database.getGameStrategyConfig(terminal.gameStrategyId);const betStrategyWin=database.getBetStrategyConfig(terminal.betStrategyWinId);const betStrategyLoss=database.getBetStrategyConfig(terminal.betStrategyLossId);const betPlanWin=database.getBetPlanConfig(terminal.betPlanWinId);const betPlanLoss=database.getBetPlanConfig(terminal.betPlanLossId);if(!gameStrategy||!betStrategyWin||!betStrategyLoss||!betPlanWin||!betPlanLoss)return failure('Configuração do Terminal inválida.');const engine=new SimulationEngine();const results=[10,20,50,100].map(terminalCount=>{const started=performance.now();for(let index=0;index<terminalCount;index++)engine.run({rounds,gameStrategyId:terminal.gameStrategyId,gameStrategy,betStrategyWinId:terminal.betStrategyWinId,betStrategyLossId:terminal.betStrategyLossId,betStrategyWin,betStrategyLoss,betPlanWin,betPlanLoss,initialBankrollCents:terminal.initialBankrollCents});const durationMs=Math.max(.01,performance.now()-started);const totalEvaluations=terminalCount*rounds.length;return{terminalCount,roundsPerTerminal:rounds.length,totalEvaluations,durationMs,evaluationsPerSecond:Math.round(totalEvaluations/durationMs*1000)}});database.logEvent('SYSTEM','INFO','PERFORMANCE_BENCHMARK_FINISHED',{results});return success(results);});
   ipcMain.handle('recovery:list',():ApiResult<RecoverySnapshot[]>=>success(database.listRecoverySnapshots()));
   ipcMain.handle('recovery:restore',(_event,raw):ApiResult<boolean>=>{const parsed=recoverySnapshotIdSchema.safeParse(raw);if(!parsed.success)return failure('Snapshot inválido.');try{screenAutomation.setPaused(true);database.restoreRecoverySnapshot(parsed.data);notifyDataChanged();return success(true);}catch(error){return failure(error instanceof Error?error.message:'Falha ao restaurar snapshot.');}});
   ipcMain.handle('workspace:export', async (): Promise<ApiResult<string | null>> => {
@@ -438,7 +454,7 @@ function registerIpc() {
     catch(error) { return failure(error instanceof Error ? error.message : 'Falha ao importar workspace.'); }
   });
   ipcMain.handle('configuration:list', (_event, raw): ApiResult<ConfigurationDocument[]> => { const kinds:ConfigurationKind[]=['GAME_STRATEGY','BET_STRATEGY','BET_PLAN','SCHEDULE_PLAN']; const kind=raw?.kind as ConfigurationKind|undefined; return kind&&!kinds.includes(kind)?failure('Tipo de configuração inválido.'):success(database.listConfigurationDocuments(kind)); });
-  ipcMain.handle('configuration:save', (_event, raw): ApiResult<ConfigurationDocument> => { const parsed=saveConfigurationSchema.safeParse(raw);if(!parsed.success)return failure(parsed.error.issues.map(issue=>`${issue.path.join('.')||'configuração'}: ${issue.message}`).join(' '));const document=database.saveConfiguration(parsed.data);notifyDataChanged();return success(document); });
+  ipcMain.handle('configuration:save', (_event, raw): ApiResult<ConfigurationDocument> => { const parsed=saveConfigurationSchema.safeParse(raw);if(!parsed.success)return failure(parsed.error.issues.map(issue=>`${issue.path.join('.')||'configuração'}: ${issue.message}`).join(' '));const document=database.saveConfiguration(parsed.data);if(parsed.data.id&&parsed.data.kind!=='SCHEDULE_PLAN')for(const terminal of database.listTerminals().filter(item=>terminalUsesConfiguration(item,document.id,document.kind)))preloadTerminalTree(terminal.id);notifyDataChanged();return success(document); });
   ipcMain.handle('configuration:duplicate', (_event, raw): ApiResult<ConfigurationDocument> => {const parsed=configurationActionSchema.safeParse(raw);if(!parsed.success)return failure('Configuração inválida.');const copy=database.duplicateConfiguration(parsed.data.id,parsed.data.kind);if(!copy)return failure('Configuração não encontrada.');notifyDataChanged();return success(copy);});
   ipcMain.handle('configuration:delete', (_event, raw): ApiResult<boolean> => {const parsed=configurationActionSchema.safeParse(raw);if(!parsed.success)return failure('Configuração inválida.');try{database.deleteConfiguration(parsed.data.id,parsed.data.kind);notifyDataChanged();return success(true);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível excluir.');}});
   ipcMain.handle('app:restart', () => { screenAutomation.setPaused(true); app.relaunch(); app.exit(0); return true; });
@@ -448,6 +464,40 @@ function registerIpc() {
 }
 
 function notifyDataChanged() { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:data-changed'); }
+
+function getTerminalHistoryDisplayMax(){return Math.max(10,Math.min(500,database.getAppSetting<number>('terminal_history_display_max')??200));}
+
+const TERMINAL_HISTORY_SIGNAL_LIMIT=500;
+const TERMINAL_HISTORY_ROUND_LIMIT=10_000;
+
+function preloadTerminalHistory(terminalId:string){
+  const terminal=database.getTerminal(terminalId);if(!terminal)return 0;
+  const operationalRounds=database.getBacktestRounds(terminal.platformId,TERMINAL_HISTORY_ROUND_LIMIT);
+  const archivedRounds=archiveDatabase.getRounds(terminal.platformId,TERMINAL_HISTORY_ROUND_LIMIT,true);
+  const rounds=[...new Map([...archivedRounds,...operationalRounds].map(round=>[round.dedupKey,round])).values()]
+    .sort((left,right)=>left.occurredAt.localeCompare(right.occurredAt))
+    .slice(-TERMINAL_HISTORY_ROUND_LIMIT);
+  for(const round of rounds)database.insertRound({...round,platformId:terminal.platformId,deliveryMode:'BACKLOG'});
+  const processed=terminalManager.rebuildTerminalFromHistory(terminalId,rounds);
+  const availableSignals=database.getTerminalHistory(terminalId,TERMINAL_HISTORY_SIGNAL_LIMIT).length;
+  database.logEvent('TERMINAL','INFO','TERMINAL_HISTORY_PRELOADED',{terminalId,platformId:terminal.platformId,requestedSignals:TERMINAL_HISTORY_SIGNAL_LIMIT,requestedRounds:TERMINAL_HISTORY_ROUND_LIMIT,availableRounds:rounds.length,availableSignals,processed,source:'ARCHIVE+OPERATIONAL'});
+  return processed;
+}
+
+function preloadTerminalTree(terminalId:string,visited=new Set<string>()){if(visited.has(terminalId))return;visited.add(terminalId);preloadTerminalHistory(terminalId);for(const dependent of database.listTerminals().filter(item=>item.strategySourceTerminalId===terminalId))preloadTerminalTree(dependent.id,visited);}
+
+function terminalAnalysisConfigurationChanged(previous:Terminal,current:Terminal){
+  return previous.platformId!==current.platformId||previous.gameStrategyId!==current.gameStrategyId||previous.strategySourceTerminalId!==current.strategySourceTerminalId||previous.betStrategyWinId!==current.betStrategyWinId||previous.betStrategyLossId!==current.betStrategyLossId||previous.betPlanWinId!==current.betPlanWinId||previous.betPlanLossId!==current.betPlanLossId||JSON.stringify(previous.operationCombinations)!==JSON.stringify(current.operationCombinations)||!sameIds(previous.controlPlayRuleIds,current.controlPlayRuleIds)||!sameIds(previous.controlPauseRuleIds,current.controlPauseRuleIds);
+}
+
+function sameIds(left:string[],right:string[]){const sortedLeft=[...left].sort();const sortedRight=[...right].sort();return sortedLeft.length===sortedRight.length&&sortedLeft.every((id,index)=>id===sortedRight[index]);}
+
+function terminalUsesConfiguration(terminal:Terminal,configurationId:string,kind:ConfigurationKind){
+  if(kind==='GAME_STRATEGY')return terminal.gameStrategyId===configurationId;
+  if(kind==='BET_STRATEGY')return terminal.betStrategyWinId===configurationId||terminal.betStrategyLossId===configurationId||terminal.operationCombinations.some(item=>item.betStrategyId===configurationId);
+  if(kind==='BET_PLAN')return terminal.betPlanWinId===configurationId||terminal.betPlanLossId===configurationId||terminal.operationCombinations.some(item=>item.betPlanId===configurationId);
+  return false;
+}
 
 function success<T>(data: T): ApiResult<T> { return { ok: true, data }; }
 function failure<T>(error: string): ApiResult<T> { return { ok: false, error }; }

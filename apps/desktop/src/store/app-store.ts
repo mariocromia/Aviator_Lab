@@ -29,7 +29,7 @@ interface AppState extends Omit<BootstrapData, 'session'> {
   clearError(): void;
 }
 
-const empty: Omit<BootstrapData, 'session'> = { platforms: [], terminals: [], gameStrategies: [], betStrategies: [], betPlans: [], schedulePlans:[], recentRounds: [], collectors: [], terminalRuntimes: [], terminalHistories: {}, screenProfiles: [], terminalSchedules:[],terminalControlRules:[], eventBus: { publishedEvents: 0, deliveredEvents: 0, failedDeliveries: 0, subscribersByPlatform: {} } };
+const empty: Omit<BootstrapData, 'session'> = { platforms: [], terminals: [], gameStrategies: [], betStrategies: [], betPlans: [], schedulePlans:[], recentRounds: [], collectors: [], terminalRuntimes: [], terminalHistories: {},terminalHistoryDisplayMax:200, screenProfiles: [], terminalSchedules:[],terminalControlRules:[], eventBus: { publishedEvents: 0, deliveredEvents: 0, failedDeliveries: 0, subscribersByPlatform: {} } };
 let activeRefresh:Promise<void>|null=null;
 let refreshQueued=false;
 

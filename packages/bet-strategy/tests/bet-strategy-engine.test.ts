@@ -34,10 +34,11 @@ describe('BetStrategyEngine', () => {
     expect(decision.ruleId).toBe('pattern');
   });
 
-  it('carries the main and post-win plans into the decision', () => {
+  it('carries only the optional post-win plan into the decision', () => {
     const mainPlanId = crypto.randomUUID(); const followUpPlanId = crypto.randomUUID();
     const config: BetStrategyConfig = { rules: [{ id: 'plans', name: 'Planos', enabled: true, priority: 1, conditions: [{ field: 'currentLossStreak', operator: 'EQ', referenceField: 'lastClosedLossStreak' }], action: 'ENTER', betPlanId: mainPlanId, onWinBetPlanId: followUpPlanId, onWinPlanBehavior: 'REPEAT_UNTIL_LOSS' }] };
     const decision = decide(config, analyzer({ currentLossStreak: 3, lastClosedLossStreak: 3 }));
-    expect(decision.metadata).toMatchObject({ betPlanId: mainPlanId, onWinBetPlanId: followUpPlanId, onWinPlanBehavior: 'REPEAT_UNTIL_LOSS' });
+    expect(decision.metadata).not.toHaveProperty('betPlanId');
+    expect(decision.metadata).toMatchObject({ onWinBetPlanId: followUpPlanId, onWinPlanBehavior: 'REPEAT_UNTIL_LOSS' });
   });
 });

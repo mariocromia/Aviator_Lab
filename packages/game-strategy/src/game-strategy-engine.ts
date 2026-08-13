@@ -67,7 +67,7 @@ export class GameStrategyEngine {
       runtime,
       annotation: {
         id: randomUUID(), terminalId, roundId: round.id, strategyId, role, stateBefore, stateAfter: runtime.state,
-        metadata: { multiplier: round.multiplier, deliveryMode: round.deliveryMode, releaseProgress: runtime.releaseProgress, releaseRequired: Math.max(1, Math.trunc(config.releaseConsecutiveCount ?? 1)) }, createdAt: new Date().toISOString()
+        metadata: { multiplier: round.multiplier, deliveryMode: round.deliveryMode, releaseProgress: runtime.releaseProgress, releaseRequired: Math.max(1, Math.trunc(config.releaseConsecutiveCount ?? 1)) }, createdAt: round.occurredAt
       },
       signal
     };
@@ -96,7 +96,7 @@ function evaluate(multiplier: number, condition: MultiplierCondition): boolean {
 function createSignal(input: GameStrategyProcessInput, result: GameSignal['result'], triggerRoundId: string): GameSignal {
   return {
     id: randomUUID(), terminalId: input.terminalId, platformId: input.round.platformId, strategyId: input.strategyId,
-    triggerRoundId, resultRoundId: input.round.id, result, createdAt: new Date().toISOString(),
+    triggerRoundId, resultRoundId: input.round.id, result, createdAt: input.round.occurredAt,
     metadata: { multiplier: input.round.multiplier, deliveryMode: input.round.deliveryMode }
   };
 }

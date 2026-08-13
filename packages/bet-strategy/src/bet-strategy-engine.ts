@@ -26,7 +26,7 @@ export class BetStrategyEngine {
     return {
       id: randomUUID(), terminalId: input.terminalId, platformId: input.signal.platformId, betStrategyId: input.betStrategyId,
       gameSignalId: input.signal.id, ruleId: selected?.id ?? null, action: selected?.action ?? 'IGNORE', createdAt: new Date().toISOString(),
-      metadata: { evaluations, analyzer: input.analyzer, bankrollCents: input.bankrollCents, betPlanId: selected?.betPlanId ?? null, onWinBetPlanId: selected?.onWinBetPlanId ?? null, onWinPlanBehavior: selected?.onWinPlanBehavior ?? 'RUN_ONCE' }
+      metadata: { evaluations, analyzer: input.analyzer, bankrollCents: input.bankrollCents, onWinBetPlanId: selected?.onWinBetPlanId ?? null, onWinPlanBehavior: selected?.onWinPlanBehavior ?? 'RUN_ONCE' }
     };
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { BetDecision, BetExecution, BetStageEvent, BetStrategyConfig, GameSignal, GameStrategyConfig, NormalizedRound, RoundAnnotation, Terminal, TerminalControlRule, TerminalRuntime } from '@aviator/shared';
+import type { BetDecision, BetExecution, BetPlanConfig, BetStageEvent, BetStrategyConfig, GameSignal, GameStrategyConfig, NormalizedRound, RoundAnnotation, Terminal, TerminalControlRule, TerminalRuntime } from '@aviator/shared';
 import { RoundEventBus } from '@aviator/collector';
 import { createTerminal, TerminalManager, type TerminalRuntimeRepository } from '../src/index.js';
 
@@ -10,6 +10,7 @@ class MemoryRepository implements TerminalRuntimeRepository {
   betStrategyConfigs=new Map<string,BetStrategyConfig>();
   betPlanStageCount=3;
   betPlanCashout=2;
+  betPlanConfig:BetPlanConfig|null=null;
   controlRules:TerminalControlRule[]=[];
   listTerminals() { return [...this.terminals.values()]; }
   getTerminal(id: string) { return this.terminals.get(id) ?? null; }
@@ -17,6 +18,7 @@ class MemoryRepository implements TerminalRuntimeRepository {
   updateTerminal(terminal: Terminal) { this.terminals.set(terminal.id, structuredClone(terminal)); }
   deleteTerminal(id: string) { this.terminals.delete(id); this.runtimes.delete(id); }
   resetTerminal(id:string,clearHistory=false){const terminal=this.terminals.get(id);if(terminal){terminal.currentBankrollCents=terminal.initialBankrollCents;if(clearHistory){terminal.gameWins=0;terminal.gameLosses=0;}}if(clearHistory){this.runtimes.delete(id);this.annotations=this.annotations.filter(item=>item.terminalId!==id);this.signals=this.signals.filter(item=>item.terminalId!==id);this.decisions=this.decisions.filter(item=>item.terminalId!==id);this.stages=this.stages.filter(item=>item.terminalId!==id);this.executions=this.executions.filter(item=>item.terminalId!==id);}}
+  clearTerminalCalculatedHistory(id:string){const terminal=this.terminals.get(id);if(terminal){terminal.gameWins=0;terminal.gameLosses=0;}this.runtimes.delete(id);this.receipts=new Set([...this.receipts].filter(key=>!key.startsWith(`${id}:`)));this.annotations=this.annotations.filter(item=>item.terminalId!==id);this.signals=this.signals.filter(item=>item.terminalId!==id);this.decisions=this.decisions.filter(item=>item.terminalId!==id);this.stages=this.stages.filter(item=>item.terminalId!==id);this.executions=this.executions.filter(item=>item.terminalId!==id);}
   updateTerminalInitialBankroll(id:string,value:number){const terminal=this.terminals.get(id);if(terminal){terminal.initialBankrollCents=value;terminal.currentBankrollCents=value;}}
   setTerminalPaused(id: string, paused: boolean) { const terminal = this.terminals.get(id); if (terminal) terminal.paused = paused; }
   getTerminalRuntime(id: string) { const runtime = this.runtimes.get(id); return runtime ? structuredClone(runtime) : null; }
@@ -25,12 +27,14 @@ class MemoryRepository implements TerminalRuntimeRepository {
   getGameStrategyConfig() { return strategyConfig; }
   saveRoundAnnotation(annotation: RoundAnnotation) { this.annotations.push(annotation); }
   saveGameSignal(signal: GameSignal) { this.signals.push(signal); }
+  getTerminalGameSignalByRound(terminalId:string,roundId:string){return[...this.signals].reverse().find((signal:GameSignal)=>signal.terminalId===terminalId&&signal.resultRoundId===roundId)??null;}
   getBetStrategyConfig(id:string) { return this.betStrategyConfigs.get(id)??this.betStrategyConfig; }
   saveBetDecision(decision: BetDecision) { this.decisions.push(decision); }
   updateTerminalGameStats(id: string, wins: number, losses: number) { const terminal = this.terminals.get(id); if (terminal) { terminal.gameWins = wins; terminal.gameLosses = losses; } }
-  getBetPlanConfig() { return { stages: Array.from({ length: this.betPlanStageCount }, (_, index) => ({ index, label: index === 0 ? 'BASE' : `GALE ${index}`, legs: [{ slot: 1, amountCents: 100 * 2 ** index, cashout: this.betPlanCashout }] })) }; }
+  getBetPlanConfig() { return this.betPlanConfig??{ stages: Array.from({ length: this.betPlanStageCount }, (_, index) => ({ index, label: index === 0 ? 'BASE' : `GALE ${index}`, legs: [{ slot: 1, amountCents: 100 * 2 ** index, cashout: this.betPlanCashout }] })) }; }
   getTerminalSchedule() { return null; }
   listTerminalControlRules() { return this.controlRules; }
+  getTerminalControlRules(terminalId:string) { return this.controlRules.filter(rule=>!rule.targetTerminalId||rule.targetTerminalId===terminalId); }
   saveBetStageEvent(event: BetStageEvent) { this.stages.push(event); }
   saveBetExecution(execution: BetExecution) { this.executions.push(execution); }
   updateTerminalBankroll(id: string, balanceCents: number) { const terminal = this.terminals.get(id); if (terminal) terminal.currentBankrollCents = balanceCents; }
@@ -96,6 +100,19 @@ describe('TerminalManager', () => {
     expect(repository.decisions.map(decision => decision.action)).toEqual(['IGNORE', 'ENTER']);
   });
 
+  it('always uses the bet plan configured on the terminal, ignoring a legacy main plan on the entry rule', async () => {
+    const repository = new MemoryRepository(); const terminal = makeTerminal('Plano do terminal'); const legacyRulePlanId = crypto.randomUUID();
+    repository.betStrategyConfig = { rules: [{ id: 'legacy-plan', name: 'Entrada com plano antigo', enabled: true, priority: 1, conditions: [{ field: 'currentLossStreak', operator: 'EQ', value: 2 }], action: 'ENTER', betPlanId: legacyRulePlanId }] };
+    repository.saveTerminal(terminal);
+    const preparedPlanIds:string[]=[];
+    const manager = new TerminalManager(repository, new RoundEventBus());
+    manager.setAssistedPreparationHandler(request=>{preparedPlanIds.push(request.betPlanId)});
+    manager.initialize();
+    for (const multiplier of [1.72, 1.25, 2.27, 1.25]) await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(preparedPlanIds.at(-1)).toBe(terminal.betPlanLossId);
+    expect(preparedPlanIds).not.toContain(legacyRulePlanId);
+  });
+
   it('updates configuration and moves the live subscription to the selected platform', async () => {
     const repository = new MemoryRepository(); const terminal = makeTerminal('T1'); repository.saveTerminal(terminal);
     const manager = new TerminalManager(repository, new RoundEventBus()); manager.initialize();
@@ -114,12 +131,141 @@ describe('TerminalManager', () => {
     expect(manager.getRuntime(terminal.id)?.resultAnalyzerState).toMatchObject({recentPattern:'WLW',winCount:2,lossCount:1});
   });
 
+  it('drives a dependent Terminal from the W/L signals of its principal Terminal',async()=>{
+    const repository=new MemoryRepository();const principal=makeTerminal('Principal');const dependent=makeTerminal('Dependente');dependent.strategySourceTerminalId=principal.id;
+    principal.betStrategyWinId=crypto.randomUUID();principal.betStrategyLossId=crypto.randomUUID();dependent.betStrategyWinId=crypto.randomUUID();dependent.betStrategyLossId=crypto.randomUUID();
+    repository.betStrategyConfigs.set(principal.betStrategyWinId,{rules:[{id:'principal-ignore',name:'Não apostar',enabled:true,priority:1,conditions:[{field:'winCount',operator:'GT',value:999}],action:'ENTER'}]});repository.betStrategyConfigs.set(principal.betStrategyLossId,repository.betStrategyConfigs.get(principal.betStrategyWinId)!);
+    repository.betStrategyConfigs.set(dependent.betStrategyWinId,{rules:[{id:'dependent-w1',name:'Entrar no W1 do principal',enabled:true,priority:1,conditions:[{field:'currentWinStreak',operator:'EQ',value:1}],action:'ENTER'}]});repository.betStrategyConfigs.set(dependent.betStrategyLossId,{rules:[{id:'dependent-ignore',name:'Ignorar LOSS',enabled:true,priority:1,conditions:[{field:'currentLossStreak',operator:'GT',value:999}],action:'ENTER'}]});
+    repository.saveTerminal(principal);repository.saveTerminal(dependent);repository.terminals.delete(principal.id);repository.saveTerminal(principal);
+    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    for(const multiplier of[1.72,2.5,1.72,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    const principalSignals=repository.signals.filter(signal=>signal.terminalId===principal.id);const dependentSignals=repository.signals.filter(signal=>signal.terminalId===dependent.id);
+    expect(dependentSignals.map(signal=>signal.result)).toEqual(principalSignals.map(signal=>signal.result));
+    expect(dependentSignals.every(signal=>signal.metadata.sourceTerminalId===principal.id)).toBe(true);
+    expect(repository.decisions.filter(decision=>decision.terminalId===dependent.id).map(decision=>decision.action)).toEqual(['ENTER','IGNORE']);
+    expect(repository.stages.filter(stage=>stage.terminalId===dependent.id)).toHaveLength(1);
+  });
+
+  it('rejects cross-platform and circular Terminal references',()=>{
+    const repository=new MemoryRepository();const principal=makeTerminal('Principal');const dependent=makeTerminal('Dependente');repository.saveTerminal(principal);repository.saveTerminal(dependent);const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    expect(()=>manager.updateTerminal(dependent.id,{...dependent,strategySourceTerminalId:principal.id,platformId:crypto.randomUUID()})).toThrow('mesma plataforma');
+    manager.updateTerminal(dependent.id,{...dependent,strategySourceTerminalId:principal.id});
+    expect(()=>manager.updateTerminal(principal.id,{...principal,strategySourceTerminalId:dependent.id})).toThrow('ciclo');
+  });
+
+  it('selects the highest-priority source-pattern combination and repeats its own plan until source LOSS',async()=>{
+    const repository=new MemoryRepository();const source=makeTerminal('Fonte');const dependent=makeTerminal('Operacional');dependent.strategySourceTerminalId=source.id;
+    const strategyLlw=crypto.randomUUID();const strategyLw=crypto.randomUUID();const planLlw=crypto.randomUUID();const planLw=crypto.randomUUID();
+    dependent.operationCombinations=[
+      {id:'llw',name:'LLW até LOSS',priority:10,enabled:true,betStrategyId:strategyLlw,betPlanId:planLlw,behavior:'REPEAT_UNTIL_LOSS'},
+      {id:'lw',name:'LW até LOSS',priority:20,enabled:true,betStrategyId:strategyLw,betPlanId:planLw,behavior:'REPEAT_UNTIL_LOSS'}
+    ];
+    repository.betStrategyConfigs.set(strategyLlw,{rules:[{id:'pattern-llw',name:'LLW',enabled:true,priority:1,conditions:[{field:'recentPattern',operator:'MATCHES',value:'LLW'}],action:'ENTER'}]});
+    repository.betStrategyConfigs.set(strategyLw,{rules:[{id:'pattern-lw',name:'LW',enabled:true,priority:1,conditions:[{field:'recentPattern',operator:'MATCHES',value:'LW'}],action:'ENTER'}]});
+    repository.saveTerminal(source);repository.saveTerminal(dependent);const preparedPlans:string[]=[];const manager=new TerminalManager(repository,new RoundEventBus());manager.setAssistedPreparationHandler(request=>{if(request.terminalId===dependent.id)preparedPlans.push(request.betPlanId)});manager.initialize();
+    for(const multiplier of[1.72,1.25,2.27,1.25,2.27,2.5,1.72,2.5,1.72,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.decisions.filter(item=>item.terminalId===dependent.id&&item.action==='ENTER').at(0)?.metadata).toMatchObject({operationCombinationId:'llw'});
+    expect(preparedPlans.every(id=>id===planLlw)).toBe(true);
+    expect(repository.executions.filter(item=>item.terminalId===dependent.id).map(item=>item.result)).toEqual(['WIN','LOSS']);
+    expect(manager.getRuntime(dependent.id)?.galeRuntime.active).toBe(false);
+  });
+
+  it('replays all supplied historical rounds so the UI can retain the latest 500 calculated signals',()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Preload');terminal.currentBankrollCents=7_500;repository.saveTerminal(terminal);const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    const sequence=[1.72,1.25,2.27,1.25,2.27,2.5];const rounds=Array.from({length:520},(_,index)=>makeRound(sequence[index%sequence.length]));
+    expect(manager.rebuildTerminalFromHistory(terminal.id,rounds)).toBe(520);
+    const runtime=manager.getRuntime(terminal.id)!;
+    expect(runtime.gameStrategyRuntime.processedRounds).toBe(520);
+    expect(runtime.gameStrategyRuntime.lastMultiplier).toBe(sequence[519%sequence.length]);
+    expect(repository.signals.length).toBeGreaterThan(0);
+    expect(repository.executions.length).toBeGreaterThan(0);
+    expect(repository.getTerminal(terminal.id)?.currentBankrollCents).toBe(runtime.bankrollState.currentBalanceCents);
+    expect(runtime.bankrollState.currentBalanceCents).not.toBe(7_500);
+  });
+
   it('labels settled betting stages as BASE and GALE without mixing them with game signals', async () => {
     const repository = new MemoryRepository(); const terminal = makeTerminal('T1'); repository.saveTerminal(terminal);
     const manager = new TerminalManager(repository, new RoundEventBus()); manager.initialize();
     for (const multiplier of [1.72,1.25,2.27,1.25,2.27,1.25,2.27,2.5]) await manager.routeRoundToTerminals(makeRound(multiplier));
     expect(repository.stages.map(stage => `${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS', 'GALE 1:WIN']);
     expect(manager.getRuntime(terminal.id)?.galeRuntime.active).toBe(false);
+  });
+
+  it('waits for a new ENTER confirmation before executing the next Gale',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Gale confirmado');repository.saveTerminal(terminal);
+    repository.betStrategyConfig={rules:[{id:'win-one',name:'Entrar após W1',enabled:true,priority:1,conditions:[{field:'currentWinStreak',operator:'EQ',value:1}],action:'ENTER'}]};
+    repository.betPlanConfig={stages:[{index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:2}]},{index:1,label:'GALE 1',execution:{policy:'AFTER_ENTRY_CONFIRMATION'},legs:[{slot:1,amountCents:200,cashout:2}]}]};
+    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    for(const multiplier of[1.72,2.5,1.72,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.stages.map(stage=>stage.stageLabel)).toEqual(['BASE']);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime).toMatchObject({active:true,currentStage:1,entryConfirmed:false});
+    for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.stages).toHaveLength(1);
+    for(const multiplier of[2.27,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.stages).toHaveLength(1);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.entryConfirmed).toBe(true);
+    for(const multiplier of[1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.stages.map(stage=>stage.stageLabel)).toEqual(['BASE','GALE 1']);
+  });
+
+  it('does not use the signal that lost BASE to confirm Gale on the same processing step',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Confirmação posterior');repository.saveTerminal(terminal);
+    repository.betStrategyConfig={rules:[{id:'enter-win',name:'Entrar com WIN',enabled:true,priority:1,conditions:[{field:'winCount',operator:'GTE',value:1}],action:'ENTER'}]};
+    repository.betPlanConfig={stages:[{index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:5}]},{index:1,label:'GALE 1',execution:{policy:'AFTER_ENTRY_CONFIRMATION'},legs:[{slot:1,amountCents:200,cashout:2}]}]};
+    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    for(const multiplier of[1.72,2.5,1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS']);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime).toMatchObject({active:true,currentStage:1,entryConfirmed:false});
+    for(const multiplier of[1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.stages).toHaveLength(1);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.entryConfirmed).toBe(true);
+    for(const multiplier of[1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS','GALE 1:WIN']);
+  });
+
+  it('can close a double-bet cycle on a financial tie without advancing Gale',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Empate encerra');repository.saveTerminal(terminal);
+    repository.betStrategyConfig={rules:[{id:'always',name:'Entrada',enabled:true,priority:1,conditions:[{field:'winCount',operator:'GTE',value:1}],action:'ENTER'}]};
+    repository.betPlanConfig={continueOnTie:false,stages:[{index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:2},{slot:2,amountCents:100,cashout:5}]},{index:1,label:'GALE 1',legs:[{slot:1,amountCents:200,cashout:2}]}]};
+    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    for(const multiplier of[1.72,2.5,1.72,2])await manager.routeRoundToTerminals(makeRound(multiplier));
+    const tiedExecution=repository.executions.at(-1)!;expect(tiedExecution).toMatchObject({stageLabel:'BASE',profitLossCents:0,result:'TIE'});
+    expect(manager.getRuntime(terminal.id)?.galeRuntime).toMatchObject({active:true,currentStage:0});
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.cycleId).not.toBe(tiedExecution.cycleId);
+  });
+
+  it('can continue to Gale after a financial tie in a double bet',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Empate continua');repository.saveTerminal(terminal);
+    repository.betStrategyConfig={rules:[{id:'always',name:'Entrada',enabled:true,priority:1,conditions:[{field:'winCount',operator:'GTE',value:1}],action:'ENTER'}]};
+    repository.betPlanConfig={continueOnTie:true,stages:[{index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:2},{slot:2,amountCents:100,cashout:5}]},{index:1,label:'GALE 1',legs:[{slot:1,amountCents:200,cashout:2}]}]};
+    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    for(const multiplier of[1.72,2.5,1.72,2])await manager.routeRoundToTerminals(makeRound(multiplier));
+    const tiedExecution=repository.executions.at(-1)!;expect(tiedExecution).toMatchObject({stageLabel:'BASE',profitLossCents:0,result:'TIE'});
+    expect(manager.getRuntime(terminal.id)?.galeRuntime).toMatchObject({active:true,currentStage:1,cycleId:tiedExecution.cycleId});
+  });
+
+  it('increases the next cycle after each configured block of failed attempts and resets on WIN',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Progressão de ciclos');repository.saveTerminal(terminal);
+    repository.betStrategyConfig={rules:[{id:'always',name:'Sempre entrar',enabled:true,priority:1,conditions:[{field:'winCount',operator:'GTE',value:1}],action:'ENTER'}]};
+    repository.betPlanConfig={cycleProgression:{attemptsPerStep:3,increasePercentage:50,maxAttempts:10},stages:[{index:0,label:'BASE 5X',legs:[{slot:1,amountCents:100,cashout:5}]}]};
+    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    for(let index=0;index<5;index++)for(const multiplier of[1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.executions.map(item=>item.stakeCents)).toEqual([100,100,100,150]);
+    for(const multiplier of[1.72,5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.executions.at(-1)).toMatchObject({stakeCents:150,result:'WIN'});
+    for(const multiplier of[1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.executions.at(-1)?.stakeCents).toBe(100);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.failedCycleAttempts).toBe(1);
+  });
+
+  it('resets cycle progression after reaching the configured attempt limit',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Limite da progressão');repository.saveTerminal(terminal);
+    repository.betStrategyConfig={rules:[{id:'always',name:'Sempre entrar',enabled:true,priority:1,conditions:[{field:'winCount',operator:'GTE',value:1}],action:'ENTER'}]};
+    repository.betPlanConfig={cycleProgression:{attemptsPerStep:3,increasePercentage:50,maxAttempts:10},stages:[{index:0,label:'BASE 5X',legs:[{slot:1,amountCents:100,cashout:5}]}]};
+    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    for(let index=0;index<12;index++)for(const multiplier of[1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.executions.slice(0,11).map(item=>item.stakeCents)).toEqual([100,100,100,150,150,150,200,200,200,250,100]);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.failedCycleAttempts).toBe(1);
   });
 
   it('does not classify the release candle as WIN or settle an armed bet',async()=>{
@@ -231,42 +377,11 @@ describe('TerminalManager', () => {
     expect(repository.stages.at(-1)).toMatchObject({stageLabel:'BASE',result:'WIN'});
   });
 
-  it('pauses and resumes a target terminal from another terminal rule with an explicit reason',async()=>{
-    const repository=new MemoryRepository();const source=makeTerminal('Origem');const target=makeTerminal('Alvo');repository.saveTerminal(source);repository.saveTerminal(target);const now=new Date().toISOString();
-    repository.controlRules=[{id:crypto.randomUUID(),name:'Proteção por perdas',sortOrder:10,enabled:true,sourceTerminalId:source.id,targetTerminalId:target.id,metric:'currentLossStreak',operator:'GTE',value:2,action:'PAUSE',createdAt:now,updatedAt:now}];
-    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();for(const multiplier of[1.72,1.25,2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
-    expect(manager.getRuntime(target.id)?.status).toBe('PAUSED');expect(manager.getRuntime(target.id)?.pauseState.reason).toContain('Proteção por perdas');
-    repository.controlRules=[{...repository.controlRules[0],id:crypto.randomUUID(),name:'Retomar após ganho',metric:'currentWinStreak',operator:'GTE',value:1,action:'RESUME'}];
-    for(const multiplier of[2.27,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));expect(manager.getRuntime(target.id)?.status).toBe('RUNNING');expect(manager.getRuntime(target.id)?.pauseState.type).toBe('NONE');
-  });
+  it('evaluates a reusable PAUSE rule against the linked terminal itself',async()=>{const repository=new MemoryRepository();const terminal=makeTerminal('Global');repository.saveTerminal(terminal);const now=new Date().toISOString();repository.controlRules=[{id:crypto.randomUUID(),name:'Proteção L2',sortOrder:10,enabled:true,metric:'currentLossStreak',operator:'GTE',value:2,action:'PAUSE',createdAt:now,updatedAt:now}];const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();for(const multiplier of[1.72,1.25,2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));expect(manager.getRuntime(terminal.id)?.status).toBe('PAUSED');expect(manager.getRuntime(terminal.id)?.pauseState.reason).toContain('Proteção L2');});
 
-  it('pauses a target using the LOSS count from the last closed betting cycle',async()=>{
-    const repository=new MemoryRepository();const source=makeTerminal('Ciclo observado');const target=makeTerminal('Alvo do ciclo');repository.saveTerminal(source);repository.saveTerminal(target);const now=new Date().toISOString();
-    repository.controlRules=[{id:crypto.randomUUID(),name:'Pausar após ciclo com 2 LOSS',sortOrder:10,enabled:true,sourceTerminalId:source.id,targetTerminalId:target.id,metric:'lastCycleLossCount',operator:'GTE',value:2,action:'PAUSE',createdAt:now,updatedAt:now}];
-    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();const sourceRuntime=manager.getRuntime(source.id)!;sourceRuntime.galeRuntime.lastCycleLossCount=2;
-    await manager.routeRoundToTerminals(makeRound(2.5));await manager.routeRoundToTerminals(makeRound(2.5));
-    expect(manager.getRuntime(target.id)?.status).toBe('PAUSED');expect(manager.getRuntime(target.id)?.pauseState.reason).toContain('LOSS no último ciclo de aposta');
-  });
+  it('resumes after PAUSE when any linked PLAY rule matches',async()=>{const repository=new MemoryRepository();const terminal=makeTerminal('Múltiplas');repository.saveTerminal(terminal);const now=new Date().toISOString();repository.controlRules=[{id:crypto.randomUUID(),name:'Play W1',sortOrder:10,enabled:true,metric:'currentWinStreak',operator:'GTE',value:1,action:'PLAY',createdAt:now,updatedAt:now},{id:crypto.randomUUID(),name:'Play impossível',sortOrder:20,enabled:true,metric:'bankroll',operator:'GT',value:999999,action:'PLAY',createdAt:now,updatedAt:now},{id:crypto.randomUUID(),name:'Pause L1',sortOrder:30,enabled:true,metric:'currentLossStreak',operator:'GTE',value:1,action:'PAUSE',createdAt:now,updatedAt:now}];const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();manager.synchronizeTerminal(terminal.id);expect(manager.getRuntime(terminal.id)?.status).toBe('PAUSED');for(const multiplier of[1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));expect(manager.getRuntime(terminal.id)?.status).toBe('RUNNING');for(const multiplier of[1.72,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));expect(manager.getRuntime(terminal.id)?.status).toBe('PAUSED');for(const multiplier of[2.5,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));expect(manager.getRuntime(terminal.id)?.status).toBe('RUNNING');expect(manager.getRuntime(terminal.id)?.pauseState.type).toBe('NONE');});
 
-  it('keeps pause and resume conditions in the same control rule',async()=>{
-    const repository=new MemoryRepository();const source=makeTerminal('Origem');const target=makeTerminal('Alvo');repository.saveTerminal(source);repository.saveTerminal(target);const now=new Date().toISOString();
-    repository.controlRules=[{id:crypto.randomUUID(),name:'Pausa com retomada automática',sortOrder:10,enabled:true,sourceTerminalId:source.id,targetTerminalId:target.id,metric:'currentLossStreak',operator:'GTE',value:2,referenceMetric:null,action:'PAUSE',resumeMetric:'currentWinStreak',resumeOperator:'GTE',resumeValue:1,resumeReferenceMetric:null,createdAt:now,updatedAt:now}];
-    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();for(const multiplier of[1.72,1.25,2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
-    expect(manager.getRuntime(target.id)?.status).toBe('PAUSED');
-    for(const multiplier of[2.27,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
-    expect(manager.getRuntime(target.id)?.status).toBe('RUNNING');expect(manager.getRuntime(target.id)?.pauseState.type).toBe('NONE');
-  });
-
-  it('resumes when its release condition matches even if the original pause metric remains true',async()=>{
-    const repository=new MemoryRepository();const source=makeTerminal('Origem persistente');const target=makeTerminal('Alvo com retomada');repository.saveTerminal(source);repository.saveTerminal(target);const now=new Date().toISOString();
-    repository.controlRules=[{id:crypto.randomUUID(),name:'Pausar pelo último ciclo',sortOrder:10,enabled:true,sourceTerminalId:source.id,targetTerminalId:target.id,metric:'lastCycleLossCount',operator:'GT',value:2,referenceMetric:null,action:'PAUSE',resumeMetric:'currentLossStreak',resumeOperator:'GTE',resumeValue:1,resumeReferenceMetric:null,createdAt:now,updatedAt:now}];
-    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();manager.getRuntime(source.id)!.galeRuntime.lastCycleLossCount=3;
-    for(const multiplier of[1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
-    expect(manager.getRuntime(target.id)?.status).toBe('PAUSED');
-    for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
-    expect(manager.getRuntime(source.id)?.resultAnalyzerState.currentLossStreak).toBe(1);
-    expect(manager.getRuntime(target.id)?.status).toBe('RUNNING');expect(manager.getRuntime(target.id)?.pauseState.type).toBe('NONE');
-  });
+  it('never overrides a manual pause with PLAY rules',()=>{const repository=new MemoryRepository();const terminal=makeTerminal('Manual');repository.saveTerminal(terminal);const now=new Date().toISOString();repository.controlRules=[{id:crypto.randomUUID(),name:'Sempre play',sortOrder:10,enabled:true,metric:'bankroll',operator:'GTE',value:0,action:'PLAY',createdAt:now,updatedAt:now}];const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();manager.pauseTerminal(terminal.id);manager.synchronizeTerminal(terminal.id);expect(manager.getRuntime(terminal.id)?.status).toBe('PAUSED');expect(manager.getRuntime(terminal.id)?.pauseState.type).toBe('MANUAL');});
 
   it('uses only the last LOSS block between WIN signals as dynamic N',async()=>{
     const repository=new MemoryRepository();const terminal=makeTerminal('Dinâmico N4');repository.saveTerminal(terminal);

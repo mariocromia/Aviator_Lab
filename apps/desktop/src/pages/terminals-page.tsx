@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { BarChart3, Bot, Clock3, Copy, Pause, Play, Plus, ReceiptText, RefreshCw, RotateCcw, Search, Settings2, SquareTerminal, Trash2, Zap } from 'lucide-react';
+import { BarChart3, Bot, Clock3, Copy, FolderOpen, Pause, Play, Plus, ReceiptText, RefreshCw, RotateCcw, Save, Search, Settings2, SquareTerminal, Trash2, Zap } from 'lucide-react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import type { NormalizedRound, ScreenProfile, Terminal, TerminalHistoryItem, TerminalRuntime } from '@aviator/shared';
+import type { NormalizedRound, ScreenProfile, Terminal, TerminalHistoryItem, TerminalOperationCombination, TerminalPreset, TerminalRuntime } from '@aviator/shared';
 import { Badge, Button, Card, Modal } from '@/components/ui';
 import { money } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
@@ -18,6 +18,8 @@ export function TerminalsPage() {
   const [botTerminal, setBotTerminal] = useState<Terminal | null>(null);
   const[resettingTerminal,setResettingTerminal]=useState<Terminal|null>(null);
   const[bankrollTerminal,setBankrollTerminal]=useState<Terminal|null>(null);
+  const[presetsOpen,setPresetsOpen]=useState(false);
+  const[savingPresetTerminal,setSavingPresetTerminal]=useState<Terminal|null>(null);
   const[syncingTerminalId,setSyncingTerminalId]=useState<string|null>(null);
   const [query, setQuery] = useState('');
   const terminals = store.terminals.filter(terminal => terminal.name.toLowerCase().includes(query.toLowerCase()));
@@ -29,7 +31,7 @@ export function TerminalsPage() {
   return <div className="p-5">
     <div className="mb-5 flex items-end justify-between">
       <div><h2 className="text-xl font-bold">Terminais</h2><p className="mt-1 text-xs text-muted">Runtimes independentes com análise W/L e decisões de aposta isoladas.</p></div>
-      <Button onClick={() => { store.clearError(); setCreating(true); }} className="bg-brand text-white hover:bg-blue-600"><Plus size={14}/> Novo Terminal</Button>
+      <div className="flex gap-2"><Button onClick={()=>setPresetsOpen(true)} className="border-line bg-elevated text-ink"><FolderOpen size={14}/>Configurações salvas</Button><Button onClick={() => { store.clearError(); setCreating(true); }} className="bg-brand text-white hover:bg-blue-600"><Plus size={14}/> Novo Terminal</Button></div>
     </div>
     <div className="mb-3 flex items-center justify-between">
       <div className="relative w-72"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted"/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Buscar Terminal..." className="h-9 w-full rounded-md border-line bg-panel pl-9 text-xs text-ink placeholder:text-muted/60 focus:border-brand focus:ring-0"/></div>
@@ -39,6 +41,7 @@ export function TerminalsPage() {
       {terminals.map(terminal => {
         const platform = store.platforms.find(item => item.id === terminal.platformId);
         const strategy = store.gameStrategies.find(item => item.id === terminal.gameStrategyId);
+        const strategySource=terminal.strategySourceTerminalId?store.terminals.find(item=>item.id===terminal.strategySourceTerminalId):null;
         const runtime = store.terminalRuntimes.find(item => item.terminalId === terminal.id);
         const analyzer = runtime?.resultAnalyzerState;
         const history = store.terminalHistories[terminal.id] ?? [];
@@ -50,11 +53,12 @@ export function TerminalsPage() {
         return <Card key={terminal.id} className="overflow-hidden">
           <div className="flex items-center border-b border-line px-4 py-3">
             <div className={`mr-3 grid h-9 w-9 place-items-center rounded-lg ${isPaused ? 'bg-warning/10 text-warning' : 'bg-success/10 text-success'}`}><SquareTerminal size={18}/></div>
-            <div className="min-w-0"><div className="flex items-center gap-2"><h3 className="truncate text-sm font-semibold">{terminal.name}</h3><Badge tone={isPaused ? 'warning' : 'success'}>{translateTerminalStatus(runtime?.status??(terminal.paused?'PAUSED':'RUNNING'))}</Badge></div><div className="mt-1 truncate font-mono text-[9px] text-muted">ID {terminal.id}</div></div>
+            <div className="min-w-0"><h3 className="truncate text-sm font-semibold">{terminal.name}</h3><div className="mt-1"><Badge tone={isPaused ? 'warning' : 'success'}>{translateTerminalStatus(runtime?.status??(terminal.paused?'PAUSED':'RUNNING'))}</Badge></div></div>
             <div className="ml-auto flex shrink-0 items-center gap-1 pl-3">
               <TerminalIconButton title={isPaused?'Retomar Terminal':'Pausar Terminal'} onClick={()=>void store.setTerminalPaused(terminal.id,!isPaused)} tone={isPaused?'success':'warning'}>{isPaused?<Play size={13}/>:<Pause size={13}/>}</TerminalIconButton>
               <TerminalIconButton title="Sincronizar configurações" onClick={()=>void synchronize(terminal.id)} disabled={syncingTerminalId===terminal.id}><RefreshCw size={13} className={syncingTerminalId===terminal.id?'animate-spin':''}/></TerminalIconButton>
               <TerminalIconButton title="Duplicar Terminal" onClick={()=>void store.duplicateTerminal(terminal.id)}><Copy size={13}/></TerminalIconButton>
+              <TerminalIconButton title="Salvar configuração completa" onClick={()=>setSavingPresetTerminal(terminal)}><Save size={13}/></TerminalIconButton>
               <TerminalIconButton title="Excluir Terminal" onClick={()=>{if(window.confirm(`Excluir ${terminal.name}? O histórico operacional deste Terminal será removido.`))void store.deleteTerminal(terminal.id)}} tone="danger"><Trash2 size={13}/></TerminalIconButton>
               <TerminalIconButton title="Opções de reset" onClick={()=>{store.clearError();setResettingTerminal(terminal)}} tone="warning"><RotateCcw size={13}/></TerminalIconButton>
               <TerminalIconButton title="Abrir gráfico" onClick={()=>setChartTerminal(terminal)}><BarChart3 size={13}/></TerminalIconButton>
@@ -74,11 +78,13 @@ export function TerminalsPage() {
           </div>
           <div className="space-y-2 p-4 text-[11px]">
             <Row label="Plataforma" value={platform?.name ?? '—'} extra="coletor compartilhado"/>
-            <Row label="Estratégia" value={strategy?.name ?? '—'}/>
+            <Row label="Fonte W/L" value={strategySource?`Terminal ${strategySource.name}`:'Jogo próprio'} extra={strategySource?'terminal principal':strategy?.name??'—'}/>
             <Row label="Estado" value={translateOperationalState(runtime)} badge="strategy"/>
-            <PatternDots history={history}/>
+            {runtime?.galeRuntime.activeCombinationId&&<Row label="Combinação ativa" value={terminal.operationCombinations.find(item=>item.id===runtime.galeRuntime.activeCombinationId)?.name??'COMBINAÇÃO OPERACIONAL'}/>}
+            <PatternDots history={history} currentBankrollCents={terminal.currentBankrollCents} limit={Math.min(terminal.historyDisplayLimit,store.terminalHistoryDisplayMax)}/>
             <Row label="Decisão de aposta" value={translateDecision(runtime?.betStrategyRuntime.lastAction)} badge="decision"/>
-            <Row label="Ciclo de aposta" value={runtime?.galeRuntime.active ? `${runtime.galeRuntime.currentStage === 0 ? 'BASE' : `GALE ${runtime.galeRuntime.currentStage}`} ${runtime.galeRuntime.followUp&&runtime.galeRuntime.followUpBehavior==='REPEAT_UNTIL_LOSS'?'PÓS-WIN':'AGUARDANDO'}` : 'SEM CICLO ATIVO'}/>
+            <Row label="Ciclo de aposta" value={translateBetCycle(runtime)}/>
+            {(runtime?.galeRuntime.failedCycleAttempts??0)>0&&<Row label="Progressão entre ciclos" value={`TENTATIVA ${(runtime?.galeRuntime.failedCycleAttempts??0)+1}`}/>}
             <Row label="Bot visual" value={screenProfile ? 'CONFIGURADO' : 'NÃO CONFIGURADO'} badge="decision"/>
             <Row label="Plano de horários" value={schedulePlan?.name??'SEMPRE ATIVO'}/>
             {!runtime?.scheduleState.allowed&&<Row label="Bloqueio de horário" value={runtime?.scheduleState.reason==='INTERVALO_BLOQUEADO'?'INTERVALO BLOQUEADO':'FORA DO HORÁRIO'}/>} 
@@ -97,7 +103,25 @@ export function TerminalsPage() {
     <TerminalScheduleModal terminal={scheduleTerminal} onClose={()=>setScheduleTerminal(null)}/>
     <TerminalResetModal terminal={resettingTerminal} onClose={()=>setResettingTerminal(null)}/>
     <InitialBankrollModal terminal={bankrollTerminal} onClose={()=>setBankrollTerminal(null)}/>
+    <TerminalPresetsModal open={presetsOpen} onClose={()=>setPresetsOpen(false)}/>
+    <SaveTerminalPresetModal terminal={savingPresetTerminal} onClose={()=>setSavingPresetTerminal(null)} onSaved={()=>{setSavingPresetTerminal(null);setPresetsOpen(true)}}/>
   </div>;
+}
+
+function SaveTerminalPresetModal({terminal,onClose,onSaved}:{terminal:Terminal|null;onClose():void;onSaved():void}){
+  const[name,setName]=useState('');const[saving,setSaving]=useState(false);const[error,setError]=useState<string|null>(null);
+  useEffect(()=>{if(terminal){setName(terminal.name);setError(null);setSaving(false)}},[terminal]);
+  async function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();const normalized=name.trim();if(normalized.length<2){setError('Informe um nome com pelo menos 2 caracteres.');return}setSaving(true);setError(null);try{const result=await window.aviator.saveTerminalPreset(terminal!.id,normalized);if(!result.ok){setError(result.error??'Não foi possível salvar a configuração.');setSaving(false);return}onSaved();}catch(reason){setError(reason instanceof Error?reason.message:'Falha ao comunicar com o banco de dados.');setSaving(false);}}
+  return <Modal title={`Salvar configuração completa • ${terminal?.name??'Terminal'}`} open={terminal!==null} onClose={onClose}><form onSubmit={submit} className="p-5"><Field label="Nome da configuração salva"><input autoFocus value={name} onChange={event=>setName(event.target.value)} placeholder="Ex.: EstrelaBet 5X completa" maxLength={100}/></Field><div className="mt-4 rounded-md border border-brand/25 bg-brand/10 p-3 text-[10px] leading-5 text-blue-100">Será criada uma cópia independente das estratégias de jogo, entradas, apostas, horários, regras de controle e bot visual deste Terminal.</div>{error&&<div className="mt-3 rounded-md border border-danger/25 bg-danger/10 p-3 text-[10px] text-red-200">{error}</div>}<div className="mt-5 flex justify-end gap-2"><Button type="button" disabled={saving} onClick={onClose} className="border-line bg-panel text-muted">Cancelar</Button><Button disabled={saving||name.trim().length<2} className="bg-brand text-white"><Save size={13}/>{saving?'Salvando...':'Salvar configuração'}</Button></div></form></Modal>;
+}
+
+function TerminalPresetsModal({open,onClose}:{open:boolean;onClose():void}){
+  const store=useAppStore();const[presets,setPresets]=useState<TerminalPreset[]>([]);const[loading,setLoading]=useState(false);const[message,setMessage]=useState<string|null>(null);
+  async function load(){setLoading(true);const result=await window.aviator.listTerminalPresets();setLoading(false);if(result.ok&&result.data)setPresets(result.data);else setMessage(result.error??'Não foi possível carregar as configurações salvas.');}
+  useEffect(()=>{if(open)void load()},[open]);
+  async function restore(id:string){setLoading(true);setMessage(null);const result=await window.aviator.restoreTerminalPreset(id);if(result.ok){await store.refresh();setMessage(`Terminal “${result.data?.name??'restaurado'}” criado com configurações próprias.`);}else setMessage(result.error??'Não foi possível restaurar.');setLoading(false);}
+  async function remove(id:string){if(!window.confirm('Excluir esta configuração salva? O Terminal original não será alterado.'))return;const result=await window.aviator.deleteTerminalPreset(id);if(!result.ok)setMessage(result.error??'Não foi possível excluir.');await load();}
+  return <Modal className="max-w-3xl" title="Configurações completas de Terminais" open={open} onClose={onClose}><div className="p-5"><p className="mb-4 text-[10px] leading-5 text-muted">Cada item é um snapshot independente. Ao restaurar, o sistema recria estratégias de jogo, entradas, apostas, horário, regras de controle e bot visual com novos IDs.</p>{message&&<div className="mb-3 rounded-md border border-brand/25 bg-brand/10 p-3 text-[10px] text-blue-100">{message}</div>}<div className="space-y-2">{loading&&presets.length===0?<div className="py-8 text-center text-xs text-muted">Carregando...</div>:presets.length===0?<div className="py-8 text-center text-xs text-muted">Nenhuma configuração completa foi salva.</div>:presets.map(preset=><div key={preset.id} className="flex items-center rounded-lg border border-line bg-canvas p-3"><div className="min-w-0"><div className="truncate text-xs font-semibold">{preset.name}</div><div className="mt-1 text-[9px] text-muted">Terminal: {preset.sourceTerminalName} • Plataforma: {preset.platformName} • {new Date(preset.createdAt).toLocaleString('pt-BR')}</div></div><div className="ml-auto flex gap-2"><Button disabled={loading} onClick={()=>void restore(preset.id)} className="bg-brand text-white"><FolderOpen size={12}/>Restaurar como novo</Button><TerminalIconButton title="Excluir configuração salva" onClick={()=>void remove(preset.id)} tone="danger"><Trash2 size={12}/></TerminalIconButton></div></div>)}</div><div className="mt-5 flex justify-end"><Button onClick={onClose} className="border-line bg-panel text-muted">Fechar</Button></div></div></Modal>;
 }
 
 function TerminalResetModal({terminal,onClose}:{terminal:Terminal|null;onClose():void}){
@@ -134,7 +158,7 @@ function TerminalTimeline({ history }: { history: TerminalHistoryItem[] }) {
             <div className="flex items-center justify-between"><span className="text-[8px] font-bold uppercase tracking-wider text-muted">Jogo</span><span className={`font-mono text-[11px] font-black ${item.gameResult === 'WIN' ? 'text-success' : 'text-danger'}`}>{item.gameResult === 'WIN' ? 'W' : 'L'}</span></div>
             <div className="mt-1 font-mono text-[9px] text-muted">{item.multiplier?.toFixed(2) ?? '—'}x</div>
             <div className="mt-1.5 border-t border-line/70 pt-1">
-              {item.stage ? <><div className="truncate text-[7px] font-bold text-blue-300">{item.stage.stageLabel}</div><div className={`mt-0.5 font-mono text-[7px] font-bold ${item.stage.result === 'WIN' ? 'text-success' : 'text-danger'}`}>{item.stage.result==='WIN'?'GANHOU':'PERDEU'}</div>{item.execution&&<div className={`mt-0.5 truncate font-mono text-[7px] ${item.execution.profitLossCents>=0?'text-success':'text-danger'}`}>{signedMoney(item.execution.profitLossCents)}</div>}</> : item.decisionAction === 'ENTER' ? <div className="font-mono text-[7px] font-bold text-warning">BASE ARMADA</div> : <div className="text-[7px] text-muted">SEM APOSTA</div>}
+              {item.stage ? <><div className="truncate text-[7px] font-bold text-blue-300">{item.stage.stageLabel}</div><div className={`mt-0.5 font-mono text-[7px] font-bold ${resultToneClass(item.stage.result)}`}>{translateResult(item.stage.result)}</div>{item.execution&&<div className={`mt-0.5 truncate font-mono text-[7px] ${item.execution.profitLossCents>0?'text-success':item.execution.profitLossCents<0?'text-danger':'text-warning'}`}>{signedMoney(item.execution.profitLossCents)}</div>}</> : item.decisionAction === 'ENTER' ? <div className="font-mono text-[7px] font-bold text-warning">BASE ARMADA</div> : <div className="text-[7px] text-muted">SEM APOSTA</div>}
             </div>
           </div>
         </div>)}
@@ -148,7 +172,7 @@ function TerminalStatementModal({ terminal, history, onClose }: { terminal: Term
   const totalStake=rows.reduce((total,row)=>total+row.execution.stakeCents,0);
   const profitLoss=rows.reduce((total,row)=>total+row.execution.profitLossCents,0);
   let maxWins=0;let maxLosses=0;let wins=0;let losses=0;
-  for(const row of rows){if(row.execution.result==='WIN'){wins++;losses=0;maxWins=Math.max(maxWins,wins)}else{losses++;wins=0;maxLosses=Math.max(maxLosses,losses)}}
+  for(const row of rows){if(row.execution.result==='WIN'){wins++;losses=0;maxWins=Math.max(maxWins,wins)}else if(row.execution.result==='LOSS'){losses++;wins=0;maxLosses=Math.max(maxLosses,losses)}else{wins=0;losses=0}}
   const lastResult=rows.at(-1)?.execution.result;let currentStreak=0;
   for(let index=rows.length-1;index>=0&&rows[index].execution.result===lastResult;index--)currentStreak++;
   return <Modal className="max-w-6xl" title={`Extrato de apostas • ${terminal?.name??'Terminal'}`} open={terminal!==null} onClose={onClose}>
@@ -165,7 +189,7 @@ function TerminalStatementModal({ terminal, history, onClose }: { terminal: Term
         <table className="w-full min-w-[980px] text-left text-[10px]">
           <thead className="sticky top-0 z-10 bg-elevated text-muted"><tr><StatementHead>Data</StatementHead><StatementHead>Rodada</StatementHead><StatementHead>Etapa</StatementHead><StatementHead>Multiplicador</StatementHead><StatementHead>Resultado</StatementHead><StatementHead>Apostado</StatementHead><StatementHead>Retorno</StatementHead><StatementHead>Ganho / perda</StatementHead><StatementHead>Saldo</StatementHead></tr></thead>
           <tbody className="divide-y divide-line">{rows.map(({item,execution})=><tr key={execution.id} className="bg-panel hover:bg-elevated/70">
-            <StatementCell>{new Date(execution.createdAt).toLocaleString('pt-BR')}</StatementCell><StatementCell mono>{item.signalId.slice(0,8)}</StatementCell><StatementCell><Badge tone={execution.stageIndex===0?'brand':'warning'}>{execution.stageLabel}</Badge></StatementCell><StatementCell mono>{execution.multiplier.toFixed(2)}x</StatementCell><StatementCell><Badge tone={execution.result==='WIN'?'success':'danger'}>{translateResult(execution.result)}</Badge></StatementCell><StatementCell mono>{money(execution.stakeCents)}</StatementCell><StatementCell mono>{money(execution.returnedCents)}</StatementCell><StatementCell mono className={execution.profitLossCents>=0?'text-success':'text-danger'}>{signedMoney(execution.profitLossCents)}</StatementCell><StatementCell mono>{money(execution.bankrollAfterCents)}</StatementCell>
+            <StatementCell>{new Date(execution.createdAt).toLocaleString('pt-BR')}</StatementCell><StatementCell mono>{item.signalId.slice(0,8)}</StatementCell><StatementCell><Badge tone={execution.stageIndex===0?'brand':'warning'}>{execution.stageLabel}</Badge></StatementCell><StatementCell mono>{execution.multiplier.toFixed(2)}x</StatementCell><StatementCell><Badge tone={resultBadgeTone(execution.result)}>{translateResult(execution.result)}</Badge></StatementCell><StatementCell mono>{money(execution.stakeCents)}</StatementCell><StatementCell mono>{money(execution.returnedCents)}</StatementCell><StatementCell mono className={execution.profitLossCents>0?'text-success':execution.profitLossCents<0?'text-danger':'text-warning'}>{signedMoney(execution.profitLossCents)}</StatementCell><StatementCell mono>{money(execution.bankrollAfterCents)}</StatementCell>
           </tr>)}{rows.length===0&&<tr><td colSpan={9} className="py-12 text-center text-xs text-muted">Nenhuma aposta liquidada neste Terminal.</td></tr>}</tbody>
         </table>
       </div>
@@ -182,17 +206,19 @@ function TerminalChartModal({ terminal, history, onClose }: { terminal: Terminal
   let gameScore = 0; let betScore = 0;
   const allData = history.map((item, index) => {
     gameScore += item.gameResult === 'WIN' ? 1 : -1;
-    if (item.stage) betScore += item.stage.result === 'WIN' ? 1 : -1;
+    if (item.stage) betScore += item.stage.result === 'WIN' ? 1 : item.stage.result === 'LOSS' ? -1 : 0;
     return { index: index + 1, gameScore, betScore, multiplier: item.multiplier ?? 0,bankroll:(item.execution?.bankrollAfterCents??terminal?.currentBankrollCents??0)/100 };
   });
   const data=range==='ALL'?allData:allData.slice(-Number(range));
   const gameWins = history.filter(item => item.gameResult === 'WIN').length;
   const stageEvents = history.filter(item => item.stage);
   const betWins = stageEvents.filter(item => item.stage?.result === 'WIN').length;
+  const betLosses=stageEvents.filter(item=>item.stage?.result==='LOSS').length;
+  const betTies=stageEvents.filter(item=>item.stage?.result==='TIE').length;
   const common=<><CartesianGrid stroke="#222a34" strokeDasharray="3 3" vertical={false}/><XAxis dataKey="index" stroke="#66717e" fontSize={10}/><YAxis stroke="#66717e" fontSize={10}/><Tooltip contentStyle={{ background: '#161b22', border: '1px solid #2d333b', fontSize: 11 }}/></>;
   return <Modal className="max-w-7xl" title={`Gráfico • ${terminal?.name ?? 'Terminal'}`} open={terminal !== null} onClose={onClose}>
     <div className="p-5">
-      <div className="mb-4 flex items-end gap-3"><div className="grid flex-1 grid-cols-3 gap-3"><ChartMetric label="Sinais" value={String(history.length)}/><ChartMetric label="Taxa de ganhos do jogo" value={history.length ? `${(gameWins / history.length * 100).toFixed(1)}%` : '0%'}/><ChartMetric label="Taxa de ganhos das apostas" value={stageEvents.length ? `${(betWins / stageEvents.length * 100).toFixed(1)}%` : '0%'}/></div><Field label="Intervalo"><select value={range} onChange={event=>setRange(event.target.value as typeof range)}><option value="30">30 sinais</option><option value="60">60 sinais</option><option value="100">100 sinais</option><option value="250">250 sinais</option><option value="500">500 sinais</option><option value="ALL">Até 5.000 sinais</option></select></Field><Field label="Tipo de gráfico"><select value={chartType} onChange={event=>setChartType(event.target.value as typeof chartType)}><option value="AREA">Área</option><option value="LINE">Linhas</option><option value="BAR">Barras</option></select></Field></div>
+      <div className="mb-4 flex items-end gap-3"><div className="grid flex-1 grid-cols-4 gap-3"><ChartMetric label="Sinais" value={String(history.length)}/><ChartMetric label="Taxa de ganhos do jogo" value={history.length ? `${(gameWins / history.length * 100).toFixed(1)}%` : '0%'}/><ChartMetric label="Taxa de ganhos das apostas" value={betWins+betLosses ? `${(betWins/(betWins+betLosses)*100).toFixed(1)}%` : '0%'}/><ChartMetric label="Empates financeiros" value={String(betTies)}/></div><Field label="Intervalo"><select value={range} onChange={event=>setRange(event.target.value as typeof range)}><option value="30">30 sinais</option><option value="60">60 sinais</option><option value="100">100 sinais</option><option value="250">250 sinais</option><option value="500">500 sinais</option><option value="ALL">Até 5.000 sinais</option></select></Field><Field label="Tipo de gráfico"><select value={chartType} onChange={event=>setChartType(event.target.value as typeof chartType)}><option value="AREA">Área</option><option value="LINE">Linhas</option><option value="BAR">Barras</option></select></Field></div>
       <div className="h-[500px] rounded-md border border-line bg-canvas p-3">
         {data.length ? <ResponsiveContainer width="100%" height="100%">{chartType==='AREA'?<AreaChart data={data}><defs><linearGradient id="gameScore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#3b82f6" stopOpacity={.35}/><stop offset="1" stopColor="#3b82f6" stopOpacity={0}/></linearGradient></defs>{common}<Area type="monotone" dataKey="gameScore" name="Saldo W/L jogo" stroke="#60a5fa" fill="url(#gameScore)"/><Area type="monotone" dataKey="betScore" name="Saldo W/L apostas" stroke="#22c55e" fill="transparent"/></AreaChart>:chartType==='LINE'?<LineChart data={data}>{common}<Line type="monotone" dataKey="gameScore" name="Saldo W/L jogo" stroke="#60a5fa" dot={false}/><Line type="monotone" dataKey="betScore" name="Saldo W/L apostas" stroke="#22c55e" dot={false}/><Line type="monotone" dataKey="multiplier" name="Multiplicador" stroke="#a78bfa" dot={false}/></LineChart>:<BarChart data={data}>{common}<Bar dataKey="gameScore" name="Saldo W/L jogo" fill="#60a5fa"/><Bar dataKey="betScore" name="Saldo W/L apostas" fill="#22c55e"/></BarChart>}</ResponsiveContainer> : <div className="grid h-full place-items-center text-xs text-muted">Aguardando histórico para gerar o gráfico.</div>}
       </div>
@@ -244,10 +270,17 @@ function LastRoundStat({platformId,value,indicator}:{platformId:string;value:str
 
 function TerminalIconButton({title,onClick,children,tone='neutral',disabled=false}:{title:string;onClick():void;children:ReactNode;tone?:'neutral'|'success'|'warning'|'danger';disabled?:boolean}){const colors={neutral:'text-muted hover:bg-elevated hover:text-ink',success:'text-success hover:bg-success/10',warning:'text-warning hover:bg-warning/10',danger:'text-muted hover:bg-danger/10 hover:text-danger'};return <button type="button" title={title} aria-label={title} onClick={onClick} disabled={disabled} className={`grid h-7 w-7 place-items-center rounded-md border border-line disabled:cursor-wait disabled:opacity-50 ${colors[tone]}`}>{children}</button>}
 
-function PatternDots({history}:{history:TerminalHistoryItem[]}){
+function PatternDots({history,currentBankrollCents,limit}:{history:TerminalHistoryItem[];currentBankrollCents:number;limit:number}){
   const viewport=useRef<HTMLDivElement>(null);
   const[dotTooltip,setDotTooltip]=useState<{x:number;y:number;content:string}|null>(null);
-  const results=history.slice(-100);
+  const results=history.slice(-limit);
+  const balanceBySignal=new Map<string,number>();
+  let balance=currentBankrollCents;
+  for(let index=history.length-1;index>=0;index--){
+    const item=history[index];
+    if(item.execution){balanceBySignal.set(item.signalId,item.execution.bankrollAfterCents);balance=item.execution.bankrollBeforeCents;}
+    else balanceBySignal.set(item.signalId,balance);
+  }
   useEffect(()=>{const element=viewport.current;if(element)element.scrollLeft=element.scrollWidth},[history.length]);
   if(results.length===0)return <span className="text-muted">—</span>;
   return <><div ref={viewport} className="w-full min-w-0 overflow-x-auto pb-1.5" aria-label={results.map(item=>item.gameResult==='WIN'?'GANHO':'PERDA').join(', ')}><div className="flex w-max items-start gap-[3px]">{results.map(item=>{
@@ -257,13 +290,16 @@ function PatternDots({history}:{history:TerminalHistoryItem[]}){
     const betStage=item.stage?(galeLevel===0?'BASE':`G${galeLevel}`):'SEM APOSTA';
     const title=[
       `Resultado: ${item.gameResult==='WIN'?'WIN':'LOSS'}`,
+      `Horário: ${new Date(item.occurredAt??item.createdAt).toLocaleString('pt-BR')}`,
       `Multiplicador: ${item.multiplier==null?'—':`${item.multiplier.toFixed(2)}x`}`,
       `Situação: ${item.stage?`APOSTA ${betStage}`:betStage}`,
-      `Lucro / prejuízo: ${item.execution?signedMoney(item.execution.profitLossCents):'—'}`
+      `Resultado financeiro: ${item.stage?translateResult(item.stage.result):'—'}`,
+      `Lucro / prejuízo: ${item.execution?signedMoney(item.execution.profitLossCents):'—'}`,
+      `Saldo da banca: ${money(balanceBySignal.get(item.signalId)??currentBankrollCents)}`
     ].join('\n');
     const showTooltip=(x:number,y:number)=>setDotTooltip({x,y,content:title});
     return <span key={item.signalId} className="flex h-6 shrink-0 cursor-help items-start" onMouseEnter={event=>showTooltip(event.clientX,event.clientY)} onMouseMove={event=>showTooltip(event.clientX,event.clientY)} onMouseLeave={()=>setDotTooltip(null)}><span className="relative"><span className={`grid h-4 w-4 place-items-center rounded-full border font-mono text-[8px] font-black leading-none shadow-sm ${resultStyle} ${betStyle}`}>{item.gameResult==='WIN'?'W':'L'}</span>{galeLevel>0&&<span className="absolute -bottom-[5px] left-1/2 flex -translate-x-1/2 gap-px">{Array.from({length:galeLevel},(_,marker)=><span key={marker} className="h-1 w-1 rounded-full bg-red-500"/>)}</span>}</span></span>;
-  })}</div></div>{dotTooltip&&createPortal(<div role="tooltip" className="pointer-events-none fixed z-[9999] min-w-52 whitespace-pre-line rounded-md border border-line bg-elevated px-3 py-2 font-mono text-[10px] leading-5 text-ink shadow-2xl" style={{left:Math.min(dotTooltip.x+12,window.innerWidth-240),top:Math.min(dotTooltip.y+12,window.innerHeight-100)}}>{dotTooltip.content}</div>,document.body)}</>;
+  })}</div></div>{dotTooltip&&createPortal(<div role="tooltip" className="pointer-events-none fixed z-[9999] min-w-52 whitespace-pre-line rounded-md border border-line bg-elevated px-3 py-2 font-mono text-[10px] leading-5 text-ink shadow-2xl" style={{left:Math.min(dotTooltip.x+12,window.innerWidth-240),top:Math.min(dotTooltip.y+12,window.innerHeight-160)}}>{dotTooltip.content}</div>,document.body)}</>;
 }
 
 function Row({ label, value, extra, badge }: { label: string; value: string; extra?: string; badge?: 'strategy' | 'decision' }) {
@@ -274,11 +310,14 @@ function Row({ label, value, extra, badge }: { label: string; value: string; ext
 function TerminalModal({ open, terminal, onClose }: { open: boolean; terminal: Terminal | null; onClose(): void }) {
   const store = useAppStore();
   const [saving, setSaving] = useState(false);
+  const[selectedPlatformId,setSelectedPlatformId]=useState(terminal?.platformId??store.platforms[0]?.id??'');
+  const[operationCombinations,setOperationCombinations]=useState<TerminalOperationCombination[]>(terminal?.operationCombinations??[]);
+  useEffect(()=>{if(open){setSelectedPlatformId(terminal?.platformId??store.platforms[0]?.id??'');setOperationCombinations(structuredClone(terminal?.operationCombinations??[]));}},[open,terminal,store.platforms]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); store.clearError(); setSaving(true);
     const form = new FormData(event.currentTarget);
-    const common = { name: form.get('name'), sortOrder:Number(form.get('sortOrder')), platformId: form.get('platformId'), gameStrategyId: form.get('gameStrategyId'), betStrategyId: form.get('betStrategyLossId'), betStrategyWinId:form.get('betStrategyWinId'),betStrategyLossId:form.get('betStrategyLossId'), betPlanId: form.get('betPlanLossId'),betPlanWinId:form.get('betPlanWinId'),betPlanLossId:form.get('betPlanLossId'), mode: form.get('mode') };
+    const sourceValue=form.get('strategySourceTerminalId');const common = { name: form.get('name'), sortOrder:Number(form.get('sortOrder')), platformId: form.get('platformId'), gameStrategyId: form.get('gameStrategyId'),strategySourceTerminalId:sourceValue?sourceValue:null, betStrategyId: form.get('betStrategyLossId'), betStrategyWinId:form.get('betStrategyWinId'),betStrategyLossId:form.get('betStrategyLossId'), betPlanId: form.get('betPlanLossId'),betPlanWinId:form.get('betPlanWinId'),betPlanLossId:form.get('betPlanLossId'),operationCombinations,controlPlayRuleIds:form.getAll('controlPlayRuleIds'),controlPauseRuleIds:form.getAll('controlPauseRuleIds'), mode: form.get('mode'),historyDisplayLimit:Number(form.get('historyDisplayLimit')) };
     const saved = terminal
       ? await store.updateTerminal({ id: terminal.id, ...common })
       : await store.createTerminal({ ...common, initialBankrollCents: Math.round(Number(form.get('bankroll')) * 100) });
@@ -288,25 +327,38 @@ function TerminalModal({ open, terminal, onClose }: { open: boolean; terminal: T
   return <Modal title={terminal ? `Configurar ${terminal.name}` : 'Novo Terminal'} open={open} onClose={onClose}>
     <form onSubmit={submit} className="grid grid-cols-2 gap-4 p-5">
       <Field label="Nome"><input name="name" defaultValue={terminal?.name ?? `Terminal ${store.terminals.length + 1}`} required/></Field><Field label="Ordem de classificação"><input name="sortOrder" type="number" min="0" step="1" defaultValue={terminal?.sortOrder??(store.terminals.length?Math.max(...store.terminals.map(item=>item.sortOrder))+10:10)} required/></Field>
-      <Field label="Plataforma"><select name="platformId" defaultValue={terminal?.platformId}>{store.platforms.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+      <Field label="Plataforma"><select name="platformId" value={selectedPlatformId} onChange={event=>setSelectedPlatformId(event.target.value)}>{store.platforms.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
       <Field label="Modo"><select name="mode" defaultValue={terminal?.mode ?? 'SIMULATION'}><option value="SIMULATION">Simulação</option><option value="ASSISTED">Assistido</option></select></Field>
-      <Field label="Estratégia de jogo" className="col-span-2"><select name="gameStrategyId" defaultValue={terminal?.gameStrategyId}>{store.gameStrategies.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+      <Field label="Fonte dos sinais W/L" className="col-span-2"><select name="strategySourceTerminalId" defaultValue={terminal?.strategySourceTerminalId??''}><option value="">Estratégia de jogo própria</option>{store.terminals.filter(item=>item.id!==terminal?.id&&item.platformId===selectedPlatformId).map(item=><option key={item.id} value={item.id}>Terminal principal: {item.name}</option>)}</select></Field>
+      <Field label="Bolinhas exibidas no histórico" className="col-span-2"><select name="historyDisplayLimit" defaultValue={Math.min(terminal?.historyDisplayLimit??store.terminalHistoryDisplayMax,store.terminalHistoryDisplayMax)}>{historyDotOptions(store.terminalHistoryDisplayMax).map(value=><option key={value} value={value}>{value} bolinhas</option>)}</select><p className="mt-1 text-[9px] text-muted">Limite global atual: {store.terminalHistoryDisplayMax}. O histórico armazenado não será apagado.</p></Field>
+      <Field label="Estratégia de jogo" className="col-span-2"><select name="gameStrategyId" defaultValue={terminal?.gameStrategyId}>{store.gameStrategies.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><p className="mt-1 text-[9px] text-muted">Usada somente quando a fonte estiver em “Estratégia de jogo própria”.</p></Field>
+      <fieldset className="col-span-2 rounded-lg border border-line bg-canvas p-4"><legend className="px-1 text-[10px] font-bold uppercase tracking-wider text-muted">Combinações operacionais</legend><div className="flex items-start justify-between gap-4"><p className="max-w-2xl text-[10px] leading-5 text-muted">A estratégia de entrada lê a sequência W/L da fonte. Quando confirmar, o plano escolhido é executado uma vez ou repetido até o primeiro LOSS do sinal.</p><Button type="button" onClick={()=>setOperationCombinations(items=>[...items,{id:crypto.randomUUID(),name:`Combinação ${items.length+1}`,priority:(items.length+1)*10,enabled:true,betStrategyId:store.betStrategies[0]?.id??'',betPlanId:store.betPlans[0]?.id??'',behavior:'REPEAT_UNTIL_LOSS'}])} className="shrink-0 bg-brand text-white"><Plus size={12}/>Adicionar combinação</Button></div><div className="mt-3 space-y-3">{operationCombinations.map((combination,index)=><div key={combination.id} className="rounded-md border border-line bg-panel p-3"><div className="grid grid-cols-[1fr_110px_120px_auto] gap-2"><input aria-label="Nome da combinação" value={combination.name} onChange={event=>setOperationCombinations(items=>items.map((item,itemIndex)=>itemIndex===index?{...item,name:event.target.value}:item))}/><input aria-label="Prioridade" type="number" min="0" value={combination.priority} onChange={event=>setOperationCombinations(items=>items.map((item,itemIndex)=>itemIndex===index?{...item,priority:Number(event.target.value)}:item))}/><label className="flex items-center justify-center gap-2 rounded-md border border-line text-[10px]"><input type="checkbox" checked={combination.enabled} onChange={event=>setOperationCombinations(items=>items.map((item,itemIndex)=>itemIndex===index?{...item,enabled:event.target.checked}:item))}/>Ativa</label><TerminalIconButton title="Excluir combinação" onClick={()=>setOperationCombinations(items=>items.filter((_,itemIndex)=>itemIndex!==index))} tone="danger"><Trash2 size={12}/></TerminalIconButton></div><div className="mt-2 grid grid-cols-3 gap-2"><label><span className="label">Estratégia de entrada</span><select className="mt-1.5 w-full" value={combination.betStrategyId} onChange={event=>setOperationCombinations(items=>items.map((item,itemIndex)=>itemIndex===index?{...item,betStrategyId:event.target.value}:item))}>{store.betStrategies.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span className="label">Estratégia de aposta</span><select className="mt-1.5 w-full" value={combination.betPlanId} onChange={event=>setOperationCombinations(items=>items.map((item,itemIndex)=>itemIndex===index?{...item,betPlanId:event.target.value}:item))}>{store.betPlans.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label><span className="label">Depois da entrada</span><select className="mt-1.5 w-full" value={combination.behavior} onChange={event=>setOperationCombinations(items=>items.map((item,itemIndex)=>itemIndex===index?{...item,behavior:event.target.value as TerminalOperationCombination['behavior']}:item))}><option value="REPEAT_UNTIL_LOSS">Seguir até o primeiro LOSS</option><option value="RUN_ONCE">Executar somente uma vez</option></select></label></div></div>)}{operationCombinations.length===0&&<div className="rounded-md border border-dashed border-line p-5 text-center text-[10px] text-muted">Nenhuma combinação criada. O Terminal continuará usando a configuração de compatibilidade abaixo.</div>}</div></fieldset>
+      <div className="col-span-2 text-[9px] font-bold uppercase tracking-wider text-muted">Compatibilidade sem combinações</div>
       <Field label="Estratégia de entrada após WIN"><select name="betStrategyWinId" defaultValue={terminal?.betStrategyWinId??terminal?.betStrategyId}>{store.betStrategies.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
       <Field label="Estratégia de aposta após WIN"><select name="betPlanWinId" defaultValue={terminal?.betPlanWinId??terminal?.betPlanId}>{store.betPlans.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
       <Field label="Estratégia de entrada após LOSS"><select name="betStrategyLossId" defaultValue={terminal?.betStrategyLossId??terminal?.betStrategyId}>{store.betStrategies.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
       <Field label="Estratégia de aposta após LOSS"><select name="betPlanLossId" defaultValue={terminal?.betPlanLossId??terminal?.betPlanId}>{store.betPlans.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+      <RuleSelector title="Regras PLAY" name="controlPlayRuleIds" rules={store.terminalControlRules.filter(rule=>rule.enabled&&(rule.action==='PLAY'||rule.action==='RESUME'))} selected={terminal?.controlPlayRuleIds??[]}/>
+      <RuleSelector title="Regras PAUSE" name="controlPauseRuleIds" rules={store.terminalControlRules.filter(rule=>rule.enabled&&rule.action==='PAUSE')} selected={terminal?.controlPauseRuleIds??[]}/>
       {!terminal && <Field label="Banca inicial (R$)" className="col-span-2"><input name="bankroll" type="number" min="0" step="0.01" defaultValue="1000.00" required/></Field>}
       {store.error && <div className="col-span-2 rounded-md border border-danger/25 bg-danger/10 p-3 text-[11px] text-red-200">{store.error}</div>}
-      <div className="col-span-2 mt-2 flex justify-end gap-2"><Button type="button" onClick={onClose} className="border-line bg-panel text-muted">Cancelar</Button><Button disabled={saving} className="bg-brand text-white"><Zap size={13}/>{saving ? 'Salvando...' : terminal ? 'Salvar alterações' : 'Criar Terminal'}</Button></div>
+      {saving&&<div className="col-span-2 flex items-center gap-3 rounded-md border border-brand/25 bg-brand/10 p-3 text-[10px] text-blue-100"><RefreshCw size={14} className="animate-spin"/><span>Reprocessando até 500 rodadas, apostas, Gales, extrato e banca...</span></div>}
+      <div className="col-span-2 mt-2 flex justify-end gap-2"><Button type="button" onClick={onClose} disabled={saving} className="border-line bg-panel text-muted">Cancelar</Button><Button disabled={saving} className="bg-brand text-white"><Zap size={13}/>{saving ? 'Atualizando histórico...' : terminal ? 'Salvar alterações' : 'Criar Terminal'}</Button></div>
     </form>
   </Modal>;
 }
 
+function RuleSelector({title,name,rules,selected}:{title:string;name:'controlPlayRuleIds'|'controlPauseRuleIds';rules:import('@aviator/shared').TerminalControlRule[];selected:string[]}){return <fieldset className="rounded-md border border-line bg-canvas p-3"><legend className="px-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{title}</legend><div className="mt-1 max-h-32 space-y-2 overflow-y-auto">{rules.map(rule=><label key={rule.id} className="flex items-center gap-2 text-[10px] text-ink"><input type="checkbox" name={name} value={rule.id} defaultChecked={selected.includes(rule.id)}/><span className="truncate">{rule.name}</span></label>)}{!rules.length&&<div className="text-[9px] text-muted">Nenhuma regra global deste tipo.</div>}</div></fieldset>}
+
 function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) { return <label className={className}><span className="label">{label}</span><div className="form-field mt-1.5">{children}</div></label>; }
+function historyDotOptions(max:number){return [...new Set([25,50,100,200,300,400,500,max].filter(value=>value<=max))].sort((left,right)=>left-right);}
 function signedMoney(value:number){return `${value>=0?'+':'−'} ${money(Math.abs(value))}`}
 function translateTerminalStatus(status:string){return status==='RUNNING'?'EM EXECUÇÃO':status==='PAUSED'?'PAUSADO':status==='STOPPED'?'PARADO':status}
-function translateOperationalState(runtime:TerminalRuntime|undefined){if(runtime?.galeRuntime.active){if(runtime.galeRuntime.followUp&&runtime.galeRuntime.followUpBehavior==='REPEAT_UNTIL_LOSS')return'CONTINUANDO ATÉ LOSS';const stage=runtime.galeRuntime.currentStage;return`APOSTA ${stage===0?'BASE':`G${stage}`} AGUARDANDO`;}return translateGameState(runtime?.gameStrategyRuntime.state??'SEARCH_TRIGGER');}
+function translateOperationalState(runtime:TerminalRuntime|undefined){if(runtime?.galeRuntime.active){if(runtime.galeRuntime.followUp&&runtime.galeRuntime.followUpBehavior==='REPEAT_UNTIL_LOSS')return'CONTINUANDO ATÉ LOSS';const stage=runtime.galeRuntime.currentStage;if(stage>0&&runtime.galeRuntime.entryConfirmed===false&&(runtime.galeRuntime.preparedLegAmountsCents?.length??0)===0)return`G${stage} AGUARDANDO CONFIRMAÇÃO`;return`APOSTA ${stage===0?'BASE':`G${stage}`} AGUARDANDO`;}return translateGameState(runtime?.gameStrategyRuntime.state??'SEARCH_TRIGGER');}
+function translateBetCycle(runtime:TerminalRuntime|undefined){if(!runtime?.galeRuntime.active)return'SEM CICLO ATIVO';if(runtime.galeRuntime.followUp&&runtime.galeRuntime.followUpBehavior==='REPEAT_UNTIL_LOSS')return`${runtime.galeRuntime.currentStage===0?'BASE':`GALE ${runtime.galeRuntime.currentStage}`} PÓS-WIN`;if(runtime.galeRuntime.currentStage>0&&runtime.galeRuntime.entryConfirmed===false&&(runtime.galeRuntime.preparedLegAmountsCents?.length??0)===0)return`GALE ${runtime.galeRuntime.currentStage} AGUARDANDO CONFIRMAÇÃO`;return`${runtime.galeRuntime.currentStage===0?'BASE':`GALE ${runtime.galeRuntime.currentStage}`} AGUARDANDO`;}
 function translateGameState(state:string){return state==='SEARCH_TRIGGER'?'BUSCANDO GATILHO':state==='WAIT_RESULT'?'AGUARDANDO RESULTADO':state==='WAIT_RELEASE'?'AGUARDANDO LIBERAÇÃO':state}
 function translateDecision(action:string|null|undefined){return action==='ENTER'?'ENTRAR':action==='IGNORE'?'IGNORAR':action==='PAUSE'?'PAUSAR':'—'}
-function translateResult(result:string){return result==='WIN'?'GANHO':'PERDA'}
+function translateResult(result:string){return result==='WIN'?'GANHO':result==='LOSS'?'PERDA':'EMPATE'}
+function resultToneClass(result:string){return result==='WIN'?'text-success':result==='LOSS'?'text-danger':'text-warning'}
+function resultBadgeTone(result:string):'success'|'danger'|'warning'{return result==='WIN'?'success':result==='LOSS'?'danger':'warning'}
 function roundAnalysisIndicator(runtime:TerminalRuntime|undefined){const role=runtime?.gameStrategyRuntime.lastAnnotationRole;if(role==='WIN'||role==='LOSS')return{symbol:'●',label:'Rodada analisada e adicionada à sequência',tone:'text-success'};if(role==='TRIGGER'||role==='RELEASE_TRIGGER')return{symbol:'→',label:'A próxima rodada será analisada',tone:'text-brand'};if(role)return{symbol:'×',label:'Rodada não analisável ou ignorada',tone:'text-muted'};return null;}

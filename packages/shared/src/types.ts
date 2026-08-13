@@ -6,6 +6,7 @@ export type GameStrategyState = 'SEARCH_TRIGGER' | 'WAIT_RESULT' | 'WAIT_RELEASE
 export type ConditionOperator = 'GT' | 'GTE' | 'LT' | 'LTE' | 'EQ' | 'BETWEEN';
 export type RoundAnnotationRole = 'NORMAL' | 'TRIGGER' | 'WIN' | 'LOSS' | 'IGNORED' | 'RELEASE_TRIGGER';
 export type GameSignalResult = 'WIN' | 'LOSS';
+export type BetStageResult = GameSignalResult | 'TIE';
 export type BetAction = 'ENTER' | 'IGNORE' | 'PAUSE';
 export type BetConditionOperator = ConditionOperator | 'MATCHES';
 
@@ -101,7 +102,7 @@ export interface BetStageEvent {
   gameSignalId: string;
   stageIndex: number;
   stageLabel: string;
-  result: GameSignalResult;
+  result: BetStageResult;
   createdAt: string;
 }
 
@@ -118,7 +119,7 @@ export interface BetExecution {
   profitLossCents: number;
   bankrollBeforeCents: number;
   bankrollAfterCents: number;
-  result: GameSignalResult;
+  result: BetStageResult;
   createdAt: string;
 }
 
@@ -126,6 +127,7 @@ export interface TerminalHistoryItem {
   signalId: string;
   terminalId: string;
   createdAt: string;
+  occurredAt?: string;
   gameResult: GameSignalResult;
   multiplier: number | null;
   decisionAction: BetAction | null;
@@ -162,7 +164,7 @@ export interface SchedulePlanConfig { mode: TerminalScheduleMode; timezone: stri
 export interface TerminalSchedule { terminalId: string; schedulePlanId:string; mode: TerminalScheduleMode; timezone: string; windows: TerminalScheduleWindow[]; updatedAt: string; }
 
 export type TerminalControlMetric='currentWinStreak'|'currentLossStreak'|'lastClosedWinStreak'|'lastClosedLossStreak'|'lastCycleWinCount'|'lastCycleLossCount'|'winRate'|'bankroll';
-export interface TerminalControlRule {id:string;name:string;sortOrder:number;enabled:boolean;sourceTerminalId:string;targetTerminalId:string;metric:TerminalControlMetric;operator:'GT'|'GTE'|'LT'|'LTE'|'EQ';value:number;referenceMetric?:TerminalControlMetric|null;action:'PAUSE'|'RESUME';resumeMetric?:TerminalControlMetric|null;resumeOperator?:'GT'|'GTE'|'LT'|'LTE'|'EQ'|null;resumeValue?:number|null;resumeReferenceMetric?:TerminalControlMetric|null;createdAt:string;updatedAt:string;}
+export interface TerminalControlRule {id:string;name:string;sortOrder:number;enabled:boolean;metric:TerminalControlMetric;operator:'GT'|'GTE'|'LT'|'LTE'|'EQ';value:number;referenceMetric?:TerminalControlMetric|null;action:'PAUSE'|'PLAY'|'RESUME';sourceTerminalId?:string;targetTerminalId?:string;resumeMetric?:TerminalControlMetric|null;resumeOperator?:'GT'|'GTE'|'LT'|'LTE'|'EQ'|null;resumeValue?:number|null;resumeReferenceMetric?:TerminalControlMetric|null;createdAt:string;updatedAt:string;}
 
 export type ScreenCoordinateKey = 'bet1.amount' | 'bet1.cashout' | 'bet1.action' | 'bet2.amount' | 'bet2.cashout' | 'bet2.action';
 export interface ScreenProfileValidation {
@@ -194,7 +196,7 @@ export interface AmountStrategyConfig {
   minCents?: number;
   maxCents?: number;
 }
-export type BetStageExecutionPolicy = 'NEXT_VALID_SIGNAL' | 'AFTER_N_SIGNALS' | 'AFTER_PATTERN' | 'AFTER_CONDITION';
+export type BetStageExecutionPolicy = 'NEXT_VALID_SIGNAL' | 'AFTER_N_SIGNALS' | 'AFTER_PATTERN' | 'AFTER_CONDITION' | 'AFTER_ENTRY_CONFIRMATION';
 export interface BetStageExecutionConfig {
   policy: BetStageExecutionPolicy;
   signalCount?: number;
@@ -210,7 +212,8 @@ export interface BankrollLimitsConfig {
 }
 export interface BetLegConfig { slot: number; amountCents: number; cashout: number; amountStrategy?: AmountStrategyConfig; }
 export interface BetPlanStageConfig { index: number; label: string; legs: BetLegConfig[]; execution?: BetStageExecutionConfig; }
-export interface BetPlanConfig { stages: BetPlanStageConfig[]; bankrollLimits?: BankrollLimitsConfig; }
+export interface BetCycleProgressionConfig { attemptsPerStep:number; increasePercentage:number; maxAttempts:number; }
+export interface BetPlanConfig { stages: BetPlanStageConfig[]; bankrollLimits?: BankrollLimitsConfig; continueOnTie?:boolean; cycleProgression?:BetCycleProgressionConfig; }
 
 export interface AmountCalculationContext {
   bankrollCents: number;
@@ -244,7 +247,7 @@ export interface SimulationTraceItem {
   gameResult: GameSignalResult | null;
   decisionAction: BetAction | null;
   stageLabel: string | null;
-  stageResult: GameSignalResult | null;
+  stageResult: BetStageResult | null;
   stageProfitLossCents: number;
   bankrollCents: number;
 }
@@ -252,8 +255,10 @@ export interface SimulationTraceItem {
 export interface BacktestRequest {
   platformId: string;
   gameStrategyId: string;
-  betStrategyId: string;
-  betPlanId: string;
+  betStrategyWinId: string;
+  betStrategyLossId: string;
+  betPlanWinId: string;
+  betPlanLossId: string;
   initialBankrollCents: number;
   limit: number;
 }
@@ -299,6 +304,7 @@ export interface AuditRecord {
 export interface NamedConfiguration { id: string; name: string; sortOrder: number; config: unknown; }
 export type ConfigurationKind = 'GAME_STRATEGY' | 'BET_STRATEGY' | 'BET_PLAN' | 'SCHEDULE_PLAN';
 export interface ConfigurationDocument { id: string; kind: ConfigurationKind; name: string; sortOrder: number; config: unknown; version: number; updatedAt: string | null; }
+export interface TerminalPreset { id:string; name:string; sourceTerminalName:string; platformName:string; createdAt:string; updatedAt:string; }
 export interface WorkspaceArchive {
   format: 'AVIATOR_STRATEGY_LAB'; version: 1 | 2; exportedAt: string;
   platforms: Platform[]; terminals: Terminal[]; screenProfiles: ScreenProfile[];
@@ -354,22 +360,37 @@ export interface Terminal {
   sortOrder: number;
   platformId: string;
   gameStrategyId: string;
+  strategySourceTerminalId: string | null;
   betStrategyId: string;
   betStrategyWinId: string;
   betStrategyLossId: string;
   betPlanId: string;
   betPlanWinId: string;
   betPlanLossId: string;
+  controlPlayRuleIds: string[];
+  controlPauseRuleIds: string[];
   screenProfileId: string | null;
   mode: TerminalMode;
   enabled: boolean;
   paused: boolean;
+  historyDisplayLimit: number;
+  operationCombinations: TerminalOperationCombination[];
   initialBankrollCents: number;
   currentBankrollCents: number;
   gameWins: number;
   gameLosses: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TerminalOperationCombination {
+  id: string;
+  name: string;
+  priority: number;
+  enabled: boolean;
+  betStrategyId: string;
+  betPlanId: string;
+  behavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS';
 }
 
 export interface StrategyOption { id: string; name: string; sortOrder: number; }
@@ -418,7 +439,7 @@ export interface TerminalRuntime {
   gameStrategyRuntime: { state: GameStrategyState; processedRounds: number; lastMultiplier: number | null; triggerRoundId: string | null; releaseProgress: number; lastAnnotationRole?: RoundAnnotationRole | null };
   resultAnalyzerState: ResultAnalyzerState;
   betStrategyRuntime: { lastDecisionId: string | null; lastAction: BetAction | null; decisionCount: number; entryCount: number; ignoredCount: number };
-  galeRuntime: { active: boolean; currentStage: number; cycleId: string | null; activeBetPlanId: string | null; onWinBetPlanId: string | null; followUp: boolean; followUpBehavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS'; triggerLossStreakTarget?: number | null; triggerLossProgress?:number; previousAmountCents?: number; accumulatedLossCents?: number; waitingSignals?: number; preparedLegAmountsCents?: number[]; currentCycleWinCount?:number; currentCycleLossCount?:number; lastCycleWinCount?:number; lastCycleLossCount?:number };
+  galeRuntime: { active: boolean; currentStage: number; cycleId: string | null; activeBetPlanId: string | null; activeCombinationId?:string|null; onWinBetPlanId: string | null; followUp: boolean; followUpBehavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS'; triggerLossStreakTarget?: number | null; triggerLossProgress?:number; previousAmountCents?: number; accumulatedLossCents?: number; waitingSignals?: number; entryConfirmed?:boolean; failedCycleAttempts?:number; preparedLegAmountsCents?: number[]; currentCycleWinCount?:number; currentCycleLossCount?:number; lastCycleWinCount?:number; lastCycleLossCount?:number };
   bankrollState: BankrollMetrics;
   screenControllerState: { status: 'IDLE' | 'READY' | 'MOCKING' | 'PREPARING' | 'PAUSED' | 'INVALID' | 'ERROR'; paused: boolean };
   scheduleState: { allowed: boolean; reason: string | null; checkedAt: string | null };
@@ -447,6 +468,7 @@ export interface BootstrapData {
   collectors: CollectorSnapshot[];
   terminalRuntimes: TerminalRuntime[];
   terminalHistories: Record<string, TerminalHistoryItem[]>;
+  terminalHistoryDisplayMax: number;
   screenProfiles: ScreenProfile[];
   terminalSchedules: TerminalSchedule[];
   terminalControlRules:TerminalControlRule[];

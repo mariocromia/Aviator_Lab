@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type { AiChatResponse, AiModelOption, AiSettingsView, ApiResult, AuditRecord, BacktestRun, BootstrapData, ConfigurationDocument, ConfigurationKind, PerformanceBenchmarkResult, Platform, PlatformTestResult, RecoverySnapshot, RoundArchiveStatus, ScreenCaptureResult, ScreenMockRun, ScreenProfile, ScreenProfileValidation, SystemDiagnostics, Terminal, TerminalControlRule, UserSession } from '@aviator/shared';
+import type { AiChatResponse, AiModelOption, AiSettingsView, ApiResult, AuditRecord, BacktestRun, BootstrapData, ConfigurationDocument, ConfigurationKind, PerformanceBenchmarkResult, Platform, PlatformTestResult, RecoverySnapshot, RoundArchiveStatus, ScreenCaptureResult, ScreenMockRun, ScreenProfile, ScreenProfileValidation, SystemDiagnostics, Terminal, TerminalControlRule, TerminalPreset, UserSession } from '@aviator/shared';
 
 declare global {
   interface Window {
@@ -11,6 +11,10 @@ declare global {
       updateTerminal(input: unknown): Promise<ApiResult<Terminal>>;
       syncTerminal(id:string):Promise<ApiResult<boolean>>;
       duplicateTerminal(id: string): Promise<ApiResult<Terminal>>;
+      saveTerminalPreset(terminalId:string,name:string):Promise<ApiResult<TerminalPreset>>;
+      listTerminalPresets():Promise<ApiResult<TerminalPreset[]>>;
+      restoreTerminalPreset(id:string):Promise<ApiResult<Terminal>>;
+      deleteTerminalPreset(id:string):Promise<ApiResult<boolean>>;
       deleteTerminal(id: string): Promise<ApiResult<boolean>>;
       resetTerminal(id:string,mode:'FINANCIAL'|'FULL'):Promise<ApiResult<boolean>>;
       updateTerminalInitialBankroll(id:string,initialBankrollCents:number):Promise<ApiResult<boolean>>;
@@ -48,6 +52,8 @@ declare global {
       setBackgroundCollectorEnabled(enabled:boolean):Promise<ApiResult<RoundArchiveStatus>>;
       getInterfaceScale(): Promise<ApiResult<number>>;
       setInterfaceScale(scale: number): Promise<ApiResult<number>>;
+      getTerminalHistoryDisplayMax():Promise<ApiResult<number>>;
+      setTerminalHistoryDisplayMax(value:number):Promise<ApiResult<number>>;
       runPerformanceBenchmark():Promise<ApiResult<PerformanceBenchmarkResult[]>>;
       listRecoverySnapshots():Promise<ApiResult<RecoverySnapshot[]>>;
       restoreRecoverySnapshot(id:string):Promise<ApiResult<boolean>>;
