@@ -1,0 +1,10 @@
+{
+  "name": "@aviator/terminal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": { "@aviator/shared": "*", "@aviator/collector": "*", "@aviator/game-strategy": "*", "@aviator/result-analyzer": "*", "@aviator/bet-strategy": "*" },
+  "scripts": { "typecheck": "tsc --noEmit" }
+}

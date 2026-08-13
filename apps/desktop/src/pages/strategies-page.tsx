@@ -1,0 +1,2 @@
+import { ConfigurationStudio } from '@/components/configuration-studio';
+export function StrategiesPage(){return <div className="p-5"><div className="mb-5"><h2 className="text-xl font-bold">Estratégias</h2><p className="mt-1 text-xs text-muted">Crie, valide, versione e duplique estratégias de jogo, entrada e aposta.</p></div><ConfigurationStudio allowedKinds={['GAME_STRATEGY','BET_STRATEGY','BET_PLAN']} initialKind="GAME_STRATEGY"/></div>}

@@ -1,0 +1,2 @@
+import { ConfigurationStudio } from '@/components/configuration-studio';
+export function BetPlansPage(){return <div className="p-5"><div className="mb-5"><h2 className="text-xl font-bold">Planos de aposta</h2><p className="mt-1 text-xs text-muted">Etapas BASE/GALE, múltiplas Bet Legs, valores em centavos e cashouts independentes.</p></div><ConfigurationStudio allowedKinds={['BET_PLAN']} initialKind="BET_PLAN"/></div>}
