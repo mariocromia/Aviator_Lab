@@ -51,4 +51,13 @@ describe('inteligência de padrões sequenciais',()=>{
     expect(prediction.expected).toBe('W');expect(prediction.fullCycleLossRisk).toBeCloseTo(3.125,3);
     expect(prediction.shouldEnter).toBe(false);expect(prediction.reason).toContain('4 LOSS consecutivos');
   });
+
+  it('aplica 5% como limite automatico de risco para BASE mais tres Gales',()=>{
+    const runtime={...createSequenceAiRuntime(),history:'WL',observations:500,transitions:{
+      WL:{wins:8,losses:2},LL:{wins:3,losses:7},
+    }};
+    const prediction=predictSequence(runtime,{minWindow:2,maxWindow:2,minOccurrences:10,minConfidence:60,maxCurrentLossStreak:0,minContextAgreement:0,maxFullCycleLossRisk:0},4);
+    expect(prediction.expected).toBe('W');expect(prediction.fullCycleLossRisk).toBeGreaterThan(5);
+    expect(prediction.shouldEnter).toBe(false);expect(prediction.riskBlocked).toBe(true);
+  });
 });

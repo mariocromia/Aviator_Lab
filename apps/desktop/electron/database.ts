@@ -29,6 +29,7 @@ export interface TerminalPresetSnapshot {
 
 export class AppDatabase {
   private readonly db: DatabaseSync;
+  private readonly replayTerminalIds = new Set<string>();
 
   constructor(path: string) {
     this.db = new DatabaseSync(path);
@@ -316,6 +317,14 @@ export class AppDatabase {
     return result.changes > 0;
   }
 
+  insertRounds(rounds:NormalizedRound[]):number{
+    if(!rounds.length)return 0;
+    const statement=this.db.prepare(`INSERT OR IGNORE INTO rounds (id, platform_id, external_id, multiplier, occurred_at, collected_at, source, delivery_mode, dedup_key, raw_data_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    let inserted=0;this.db.exec('BEGIN IMMEDIATE');
+    try{for(const round of rounds){const result=statement.run(round.id,round.platformId,round.externalId,round.multiplier,round.occurredAt,round.collectedAt,round.source,round.deliveryMode,round.dedupKey,round.rawData==null?null:JSON.stringify(round.rawData));inserted+=Number(result.changes);}this.db.exec('COMMIT');return inserted;}
+    catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+
   getRecentRounds(platformId?: string, limit = 40): NormalizedRound[] {
     const rows = platformId
       ? this.db.prepare('SELECT * FROM rounds WHERE platform_id = ? ORDER BY occurred_at DESC LIMIT ?').all(platformId, limit)
@@ -428,6 +437,9 @@ export class AppDatabase {
       this.db.exec('COMMIT');
     }catch(error){this.db.exec('ROLLBACK');throw error;}
   }
+
+  beginTerminalReplay(id:string){this.replayTerminalIds.add(id);}
+  endTerminalReplay(id:string){this.replayTerminalIds.delete(id);}
 
   updateTerminalInitialBankroll(id:string,initialBankrollCents:number){const now=new Date().toISOString();this.db.prepare('UPDATE terminals SET initial_bankroll_cents=?,current_bankroll_cents=?,updated_at=? WHERE id=?').run(initialBankrollCents,initialBankrollCents,now,id);this.log('TERMINAL','INFO','TERMINAL_INITIAL_BANKROLL_UPDATED',{terminalId:id,initialBankrollCents});}
   setTerminalBankrollAnchor(id:string,initialBankrollCents:number,bankrollStartAt:string){const now=new Date().toISOString();this.db.prepare('UPDATE terminals SET initial_bankroll_cents=?,current_bankroll_cents=?,bankroll_start_at=?,updated_at=? WHERE id=?').run(initialBankrollCents,initialBankrollCents,bankrollStartAt,now,id);this.log('TERMINAL','INFO','TERMINAL_BANKROLL_ANCHOR_UPDATED',{terminalId:id,initialBankrollCents,bankrollStartAt});}
@@ -774,6 +786,8 @@ export class AppDatabase {
   }
 
   private log(category: string, level: string, event: string, metadata: unknown) {
+    const terminalId=metadata&&typeof metadata==='object'&&'terminalId' in metadata?String((metadata as {terminalId?:unknown}).terminalId??''):'';
+    if(terminalId&&this.replayTerminalIds.has(terminalId))return;
     this.db.prepare('INSERT INTO event_logs VALUES (?, ?, ?, ?, ?, ?)').run(randomUUID(), category, level, event, JSON.stringify(metadata), new Date().toISOString());
   }
 }

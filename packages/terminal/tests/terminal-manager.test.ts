@@ -215,6 +215,25 @@ describe('TerminalManager', () => {
     expect(repository.executions.filter(item=>item.terminalId===dependent.id)).toHaveLength(1);
   });
 
+  it('reavalia cada saida pela IA antes de confirmar um Gale',async()=>{
+    const repository=new MemoryRepository();const source=makeTerminal('Fonte IA por saida');source.enabled=false;const dependent=makeTerminal('IA por saida');dependent.strategySourceTerminalId=source.id;
+    dependent.operationCombinations=[{id:'sequence-ai-each',name:'IA em cada saida',priority:1,enabled:true,triggerType:'SEQUENCE_AI',pattern:null,sequenceAiConfig:{minWindow:2,maxWindow:2,minOccurrences:10,minConfidence:60,maxCurrentLossStreak:0,minContextAgreement:0,maxFullCycleLossRisk:100},betStrategyId:dependent.betStrategyId,lossReentryType:'IMMEDIATE',lossReentryPattern:null,lossReentryBetStrategyId:null,betPlanId:dependent.betPlanId,behavior:'RUN_ONCE'}];
+    repository.betPlanConfig={stages:[{index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:2}]},{index:1,label:'GALE 1',legs:[{slot:1,amountCents:200,cashout:2}]}]};
+    repository.saveTerminal(source);repository.saveTerminal(dependent);const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();const runtime=manager.getRuntime(dependent.id)!;
+    runtime.sequenceAiRuntime={history:'LW',observations:100,transitions:{WL:{wins:18,losses:2},LL:{wins:2,losses:18},LW:{wins:18,losses:2}},lastPrediction:null};
+    const publish=async(multiplier:number,result:GameSignal['result'])=>{const round=makeRound(multiplier);repository.signals.push({id:crypto.randomUUID(),terminalId:source.id,platformId:source.platformId,strategyId:source.gameStrategyId,triggerRoundId:round.id,resultRoundId:round.id,result,metadata:{multiplier},createdAt:round.occurredAt});await manager.routeRoundToTerminals(round);};
+    await publish(1.2,'LOSS');
+    await publish(1.2,'LOSS');
+    expect(repository.executions.filter(item=>item.terminalId===dependent.id).map(item=>item.stageIndex)).toEqual([0]);
+    expect(runtime.galeRuntime).toMatchObject({active:true,currentStage:1,entryConfirmed:false});
+    await publish(3.2,'WIN');
+    expect(runtime.galeRuntime).toMatchObject({active:true,currentStage:1,entryConfirmed:true});
+    expect(repository.executions.filter(item=>item.terminalId===dependent.id)).toHaveLength(1);
+    await publish(3.2,'WIN');
+    expect(repository.executions.filter(item=>item.terminalId===dependent.id).map(item=>item.stageIndex)).toEqual([0,1]);
+    expect(runtime.galeRuntime.active).toBe(false);
+  });
+
   it('enters BASE with the copy and advances G1 through G3 on every following physical round',async()=>{
     const repository=new MemoryRepository();const copy=makeTerminal('Cópia operacional');copy.enabled=false;
     const third=makeTerminal('Terminal 03');third.strategySourceTerminalId=copy.id;third.strategySourceMode='BET_EXECUTIONS';
