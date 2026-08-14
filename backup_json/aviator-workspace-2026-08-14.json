@@ -1,0 +1,1041 @@
+{
+  "format": "AVIATOR_STRATEGY_LAB",
+  "version": 2,
+  "exportedAt": "2026-08-14T01:08:13.776Z",
+  "platforms": [
+    {
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "APOSTAMAX",
+      "slug": "apostamax",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "48323e32-3590-4e2f-b6fe-09d5fbc811c9",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:13.396Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000011",
+      "name": "ApostaGanha",
+      "slug": "apostaganha",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "997b99e3-4977-4fcf-ac6d-3834a384d141",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T00:45:12.625Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "ApostaOnline",
+      "slug": "apostaonline",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "48323e32-3590-4e2f-b6fe-09d5fbc811c9",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:13.397Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "ApostaTudo",
+      "slug": "apostatudo",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "48323e32-3590-4e2f-b6fe-09d5fbc811c9",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:13.400Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000010",
+      "name": "BetFusion",
+      "slug": "betfusion",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "997b99e3-4977-4fcf-ac6d-3834a384d141",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T00:45:12.627Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000012",
+      "name": "Betfair",
+      "slug": "betfair",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "b72e7e9f-7a68-4d2d-b6b7-e67c3ba6c323",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:12.693Z"
+    },
+    {
+      "id": "1fff333a-bb2c-49ac-818a-69be3db3fdb4",
+      "name": "Betnacional",
+      "slug": "betnacional",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "b72e7e9f-7a68-4d2d-b6b7-e67c3ba6c323",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 1500,
+      "historyLimit": 200,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-11T17:51:19.021Z",
+      "updatedAt": "2026-08-14T01:08:12.694Z"
+    },
+    {
+      "id": "562fdb6e-46d6-45e4-a427-fb1ef76dee36",
+      "name": "Betou",
+      "slug": "betou",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "997b99e3-4977-4fcf-ac6d-3834a384d141",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 1500,
+      "historyLimit": 200,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-11T19:08:11.515Z",
+      "updatedAt": "2026-08-14T00:45:12.629Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000014",
+      "name": "Blaze",
+      "slug": "blaze",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "b72e7e9f-7a68-4d2d-b6b7-e67c3ba6c323",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:12.695Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Brabet",
+      "slug": "brabet",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "48323e32-3590-4e2f-b6fe-09d5fbc811c9",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:13.401Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000016",
+      "name": "BravoBet",
+      "slug": "bravobet",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "dddfce2b-42dc-4fd5-afd8-a5ee0ef36f89",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:12.677Z"
+    },
+    {
+      "id": "01928d23-e9a3-422d-97a6-4f17b4a60f15",
+      "name": "Esportes da Sorte",
+      "slug": "espdasorte",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "48323e32-3590-4e2f-b6fe-09d5fbc811c9",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 1500,
+      "historyLimit": 200,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-11T18:09:42.357Z",
+      "updatedAt": "2026-08-14T01:08:13.404Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Esportes da Sorte",
+      "slug": "esportes-da-sorte",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "48323e32-3590-4e2f-b6fe-09d5fbc811c9",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:13.405Z"
+    },
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "EstrelaBet",
+      "slug": "estrelabet",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "48323e32-3590-4e2f-b6fe-09d5fbc811c9",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 1500,
+      "historyLimit": 200,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-11T16:21:25.701Z",
+      "updatedAt": "2026-08-14T01:08:13.408Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000015",
+      "name": "Jonbet",
+      "slug": "jonbet",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "b72e7e9f-7a68-4d2d-b6b7-e67c3ba6c323",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:12.697Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "SorteNaBet",
+      "slug": "sortenabet",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "48323e32-3590-4e2f-b6fe-09d5fbc811c9",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:13.409Z"
+    },
+    {
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "VBet",
+      "slug": "vbet",
+      "game": "aviator",
+      "enabled": true,
+      "sourceType": "TIPMINER",
+      "tipMinerRoundUuid": "48323e32-3590-4e2f-b6fe-09d5fbc811c9",
+      "pollIntervalMs": 2000,
+      "requestTimeoutMs": 5000,
+      "historyLimit": 2000,
+      "collectorStatus": "ONLINE",
+      "createdAt": "2026-08-13T12:35:25.833Z",
+      "updatedAt": "2026-08-14T01:08:13.412Z"
+    }
+  ],
+  "terminals": [
+    {
+      "id": "88888888-8888-4888-8888-888888888888",
+      "name": "EstrelaBet • 01",
+      "sortOrder": 1,
+      "platformId": "22222222-2222-4222-8222-222222222222",
+      "gameStrategyId": "4441bf2c-b919-40a0-982e-b407657dd4a4",
+      "strategySourceTerminalId": null,
+      "strategySourceMode": "GAME_SIGNALS",
+      "betStrategyId": "55555555-5555-4555-8555-555555555555",
+      "betStrategyWinId": "44444444-4444-4444-8444-444444444444",
+      "betStrategyLossId": "55555555-5555-4555-8555-555555555555",
+      "betPlanId": "66666666-6666-4666-8666-666666666666",
+      "betPlanWinId": "66666666-6666-4666-8666-666666666666",
+      "betPlanLossId": "66666666-6666-4666-8666-666666666666",
+      "controlPlayRuleIds": [
+        "4db55c15-532d-498a-84fa-451cd8360300"
+      ],
+      "controlPauseRuleIds": [
+        "11823b9d-4857-4520-bc6a-5e2cfbf94dfa"
+      ],
+      "screenProfileId": null,
+      "mode": "SIMULATION",
+      "enabled": true,
+      "paused": false,
+      "historyDisplayLimit": 500,
+      "entryBlockPatterns": [],
+      "operationCombinations": [],
+      "initialBankrollCents": 50000,
+      "currentBankrollCents": 50300,
+      "gameWins": 915,
+      "gameLosses": 970,
+      "createdAt": "2026-08-13T00:30:57.008Z",
+      "updatedAt": "2026-08-14T01:07:26.642Z"
+    },
+    {
+      "id": "7e68cf98-1ed7-449d-b9d3-f79dfd009fb2",
+      "name": "EstrelaBet • 01 (cópia)",
+      "sortOrder": 2,
+      "platformId": "22222222-2222-4222-8222-222222222222",
+      "gameStrategyId": "5acb5eba-2f43-4ff6-8324-e992ec5802b1",
+      "strategySourceTerminalId": "88888888-8888-4888-8888-888888888888",
+      "strategySourceMode": "GAME_SIGNALS",
+      "betStrategyId": "55555555-5555-4555-8555-555555555555",
+      "betStrategyWinId": "44444444-4444-4444-8444-444444444444",
+      "betStrategyLossId": "55555555-5555-4555-8555-555555555555",
+      "betPlanId": "b939bd1c-072b-4437-99f3-067ab8f46ce6",
+      "betPlanWinId": "b939bd1c-072b-4437-99f3-067ab8f46ce6",
+      "betPlanLossId": "b939bd1c-072b-4437-99f3-067ab8f46ce6",
+      "controlPlayRuleIds": [],
+      "controlPauseRuleIds": [],
+      "screenProfileId": null,
+      "mode": "SIMULATION",
+      "enabled": true,
+      "paused": false,
+      "historyDisplayLimit": 200,
+      "entryBlockPatterns": [],
+      "operationCombinations": [
+        {
+          "id": "46a1b4df-11e6-4308-8f1f-d5ad3f064761",
+          "name": "Combinação 1",
+          "priority": 1,
+          "enabled": true,
+          "triggerType": "PATTERN",
+          "pattern": "W",
+          "betStrategyId": "44444444-4444-4444-8444-444444444444",
+          "lossReentryType": "PATTERN",
+          "lossReentryPattern": "L",
+          "lossReentryBetStrategyId": null,
+          "betPlanId": "77777777-7777-4777-8777-777777777777",
+          "behavior": "REPEAT_UNTIL_LOSS"
+        }
+      ],
+      "initialBankrollCents": 50000,
+      "currentBankrollCents": 45050,
+      "gameWins": 605,
+      "gameLosses": 309,
+      "createdAt": "2026-08-13T14:45:33.161Z",
+      "updatedAt": "2026-08-14T01:07:26.713Z"
+    },
+    {
+      "id": "a76091a6-8f34-4124-bf1d-444f2e10616a",
+      "name": "Terminal 3",
+      "sortOrder": 12,
+      "platformId": "22222222-2222-4222-8222-222222222222",
+      "gameStrategyId": "4441bf2c-b919-40a0-982e-b407657dd4a4",
+      "strategySourceTerminalId": "7e68cf98-1ed7-449d-b9d3-f79dfd009fb2",
+      "strategySourceMode": "BET_EXECUTIONS",
+      "betStrategyId": "44444444-4444-4444-8444-444444444444",
+      "betStrategyWinId": "44444444-4444-4444-8444-444444444444",
+      "betStrategyLossId": "44444444-4444-4444-8444-444444444444",
+      "betPlanId": "77777777-7777-4777-8777-777777777777",
+      "betPlanWinId": "77777777-7777-4777-8777-777777777777",
+      "betPlanLossId": "77777777-7777-4777-8777-777777777777",
+      "controlPlayRuleIds": [],
+      "controlPauseRuleIds": [],
+      "screenProfileId": null,
+      "mode": "SIMULATION",
+      "enabled": true,
+      "paused": false,
+      "historyDisplayLimit": 200,
+      "entryBlockPatterns": [],
+      "operationCombinations": [
+        {
+          "id": "e56c1521-2f78-469d-9e3c-71e57dbd2e77",
+          "name": "Combinação 1",
+          "priority": 10,
+          "enabled": true,
+          "triggerType": "PATTERN",
+          "pattern": "W",
+          "betStrategyId": "44444444-4444-4444-8444-444444444444",
+          "lossReentryType": "IMMEDIATE",
+          "lossReentryPattern": "W",
+          "lossReentryBetStrategyId": null,
+          "betPlanId": "0012e02c-cd5e-47fe-9d64-35813f68ef53",
+          "behavior": "RUN_ONCE"
+        }
+      ],
+      "initialBankrollCents": 100000,
+      "currentBankrollCents": 92000,
+      "gameWins": 447,
+      "gameLosses": 467,
+      "createdAt": "2026-08-13T21:53:21.745Z",
+      "updatedAt": "2026-08-14T01:07:26.746Z"
+    }
+  ],
+  "screenProfiles": [],
+  "gameStrategies": [
+    {
+      "id": "4441bf2c-b919-40a0-982e-b407657dd4a4",
+      "name": "1,50 a 2,00 • 3 menores que 2,00x",
+      "sortOrder": 1,
+      "config": {
+        "trigger": [
+          {
+            "operator": "GT",
+            "value": 1.5
+          },
+          {
+            "operator": "LT",
+            "value": 99
+          }
+        ],
+        "win": [
+          {
+            "operator": "GTE",
+            "value": 2
+          }
+        ],
+        "loss": [
+          {
+            "operator": "BETWEEN",
+            "value": [
+              0,
+              1.99
+            ]
+          }
+        ],
+        "afterLoss": [
+          {
+            "operator": "LT",
+            "value": 1.5
+          }
+        ],
+        "release": [
+          {
+            "operator": "GT",
+            "value": 1.5
+          }
+        ],
+        "releaseConsecutiveCount": 2
+      }
+    },
+    {
+      "id": "5acb5eba-2f43-4ff6-8324-e992ec5802b1",
+      "name": "Entrar depois de 2 a 3,5x",
+      "sortOrder": 11,
+      "config": {
+        "trigger": [
+          {
+            "operator": "GT",
+            "value": 2
+          },
+          {
+            "operator": "LT",
+            "value": 3.5
+          }
+        ],
+        "win": [
+          {
+            "operator": "GTE",
+            "value": 2
+          }
+        ],
+        "loss": [
+          {
+            "operator": "LT",
+            "value": 2
+          }
+        ],
+        "afterLoss": [],
+        "release": [
+          {
+            "operator": "GTE",
+            "value": 2
+          }
+        ],
+        "releaseConsecutiveCount": 1
+      }
+    },
+    {
+      "id": "11825893-382e-4246-b380-eb75cc790b1c",
+      "name": "Entrar depois de 2 a 5x",
+      "sortOrder": 12,
+      "config": {
+        "trigger": [
+          {
+            "operator": "GT",
+            "value": 2
+          },
+          {
+            "operator": "LT",
+            "value": 3.5
+          }
+        ],
+        "win": [
+          {
+            "operator": "GTE",
+            "value": 2
+          }
+        ],
+        "loss": [
+          {
+            "operator": "LT",
+            "value": 2
+          }
+        ],
+        "afterLoss": [],
+        "release": [
+          {
+            "operator": "GTE",
+            "value": 2
+          }
+        ],
+        "releaseConsecutiveCount": 1
+      }
+    }
+  ],
+  "betStrategies": [
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "name": "Entrada após 1 Win",
+      "sortOrder": 10,
+      "config": {
+        "rules": [
+          {
+            "id": "44444444-4444-4444-8444-444444444444:default",
+            "name": "Entrada após 1 Win",
+            "enabled": true,
+            "priority": 1,
+            "conditions": [
+              {
+                "field": "lastClosedWinStreak",
+                "operator": "GTE",
+                "value": 1
+              }
+            ],
+            "action": "ENTER",
+            "betPlanId": "b939bd1c-072b-4437-99f3-067ab8f46ce6",
+            "onWinBetPlanId": "77777777-7777-4777-8777-777777777777",
+            "onWinPlanBehavior": "REPEAT_UNTIL_LOSS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "67cf65ac-f094-44aa-b526-c3ccc4ec6c25",
+      "name": "Entrada após 1 Win (cópia)",
+      "sortOrder": 11,
+      "config": {
+        "rules": [
+          {
+            "id": "44444444-4444-4444-8444-444444444444:default",
+            "name": "Entrada após 1 Win",
+            "enabled": true,
+            "priority": 1,
+            "conditions": [
+              {
+                "field": "lastClosedWinStreak",
+                "operator": "GTE",
+                "value": 1
+              }
+            ],
+            "action": "ENTER",
+            "betPlanId": "b939bd1c-072b-4437-99f3-067ab8f46ce6",
+            "onWinBetPlanId": "77777777-7777-4777-8777-777777777777",
+            "onWinPlanBehavior": "REPEAT_UNTIL_LOSS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "name": "Loss streak dinâmica",
+      "sortOrder": 20,
+      "config": {
+        "rules": [
+          {
+            "id": "55555555-5555-4555-8555-555555555555:default",
+            "name": "Loss streak dinâmica",
+            "enabled": true,
+            "priority": 1,
+            "conditions": [
+              {
+                "field": "currentLossStreak",
+                "operator": "EQ",
+                "referenceField": "lastClosedLossStreak"
+              }
+            ],
+            "action": "ENTER",
+            "onWinBetPlanId": "77777777-7777-4777-8777-777777777777",
+            "onWinPlanBehavior": "RUN_ONCE"
+          }
+        ]
+      }
+    },
+    {
+      "id": "78512c5e-da5d-43a8-97fb-dfd98d768234",
+      "name": "Loss streak dinâmica (cópia)",
+      "sortOrder": 21,
+      "config": {
+        "rules": [
+          {
+            "id": "55555555-5555-4555-8555-555555555555:default",
+            "name": "Loss streak dinâmica",
+            "enabled": true,
+            "priority": 1,
+            "conditions": [
+              {
+                "field": "lastClosedLossStreak",
+                "operator": "EQ",
+                "referenceField": "lastClosedLossStreak"
+              }
+            ],
+            "action": "ENTER",
+            "onWinBetPlanId": "77777777-7777-4777-8777-777777777777",
+            "onWinPlanBehavior": "REPEAT_UNTIL_LOSS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "f5b424bb-ff13-4e36-967d-c9b3c1b2dead",
+      "name": "Entrar depois de Win aposta dupla 5x",
+      "sortOrder": 30,
+      "config": {
+        "rules": [
+          {
+            "id": "rule-1786632046679",
+            "name": "Entrar depois de Win aposta dupla 5x",
+            "enabled": true,
+            "priority": 1,
+            "conditions": [
+              {
+                "field": "currentWinStreak",
+                "operator": "EQ",
+                "value": 1
+              }
+            ],
+            "action": "ENTER"
+          }
+        ]
+      }
+    },
+    {
+      "id": "faddf86c-951f-44c2-bc9a-dd36c6c61181",
+      "name": "Entrada Apos 1 Loss",
+      "sortOrder": 40,
+      "config": {
+        "rules": [
+          {
+            "id": "rule-1786636249685",
+            "name": "Entrada após 1  LOSS",
+            "enabled": true,
+            "priority": 1,
+            "conditions": [
+              {
+                "field": "lastClosedLossStreak",
+                "operator": "EQ",
+                "value": 2
+              }
+            ],
+            "action": "ENTER",
+            "betPlanId": "b939bd1c-072b-4437-99f3-067ab8f46ce6"
+          }
+        ]
+      }
+    }
+  ],
+  "betPlans": [
+    {
+      "id": "77777777-7777-4777-8777-777777777777",
+      "name": "Plano B • Entrada Dupla",
+      "sortOrder": 2,
+      "config": {
+        "stages": [
+          {
+            "index": 0,
+            "label": "BASE",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 300,
+                "cashout": 1.5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 300
+                }
+              },
+              {
+                "slot": 2,
+                "amountCents": 150,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 150
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "66666666-6666-4666-8666-666666666666",
+      "name": "Plano A • Única + G1 + G2 + G3",
+      "sortOrder": 10,
+      "config": {
+        "stages": [
+          {
+            "index": 0,
+            "label": "BASE",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 150,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 150,
+                  "minCents": 1,
+                  "maxCents": 5000
+                }
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "label": "GALE 1",
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            },
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 300,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 300,
+                  "maxCents": 5000
+                }
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "label": "GALE 2",
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            },
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 600,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 600,
+                  "maxCents": 5000
+                }
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "label": "GALE 3",
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            },
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1200,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1200
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "b939bd1c-072b-4437-99f3-067ab8f46ce6",
+      "name": "Dupla 1.5X e 5X + G1 + G2 + G3",
+      "sortOrder": 20,
+      "config": {
+        "stages": [
+          {
+            "index": 0,
+            "label": "BASE",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 400,
+                "cashout": 1.5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 400
+                }
+              },
+              {
+                "slot": 2,
+                "amountCents": 200,
+                "cashout": 5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 200
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 1,
+            "label": "GALE 1",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 800,
+                "cashout": 1.5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 800
+                }
+              },
+              {
+                "slot": 2,
+                "amountCents": 400,
+                "cashout": 5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 400
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 2,
+            "label": "GALE 2",
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            },
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1600,
+                "cashout": 1.5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1600
+                }
+              },
+              {
+                "slot": 2,
+                "amountCents": 800,
+                "cashout": 5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 800
+                }
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "label": "GALE 3",
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            },
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 3200,
+                "cashout": 1.5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 3200
+                }
+              },
+              {
+                "slot": 2,
+                "amountCents": 1600,
+                "cashout": 5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1600
+                }
+              }
+            ]
+          }
+        ],
+        "continueOnTie": false
+      }
+    },
+    {
+      "id": "3849293d-5bed-4676-8160-168393b3477f",
+      "name": "Dupla 1.5X e 2X + G1 + G2",
+      "sortOrder": 21,
+      "config": {
+        "stages": [
+          {
+            "index": 0,
+            "label": "BASE",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 400,
+                "cashout": 1.5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 400
+                }
+              },
+              {
+                "slot": 2,
+                "amountCents": 200,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 200
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 1,
+            "label": "GALE 1",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 800,
+                "cashout": 1.5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 800
+                }
+              },
+              {
+                "slot": 2,
+                "amountCents": 400,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 400
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 2,
+            "label": "GALE 2",
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            },
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1600,
+                "cashout": 1.5,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1600
+                }
+              },
+              {
+                "slot": 2,
+                "amountCents": 800,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 800
+                }
+              }
+            ]
+          }
+        ],
+        "continueOnTie": false
+      }
+    },
+    {
+      "id": "0012e02c-cd5e-47fe-9d64-35813f68ef53",
+      "name": "Simples",
+      "sortOrder": 31,
+      "config": {
+        "stages": [
+          {
+            "index": 0,
+            "label": "BASE",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 400,
+                "cashout": 2,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 400
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "schedulePlans": [],
+  "terminalSchedules": [],
+  "terminalControlRules": [
+    {
+      "id": "11823b9d-4857-4520-bc6a-5e2cfbf94dfa",
+      "name": "Pausar Loss > 3",
+      "sortOrder": 2,
+      "enabled": true,
+      "metric": "lastCycleLossCount",
+      "operator": "GTE",
+      "value": 3,
+      "referenceMetric": null,
+      "action": "PAUSE",
+      "createdAt": "2026-08-13T11:09:47.766Z",
+      "updatedAt": "2026-08-13T14:26:28.383Z"
+    },
+    {
+      "id": "4db55c15-532d-498a-84fa-451cd8360300",
+      "name": "Play - Loss <= 3",
+      "sortOrder": 2,
+      "enabled": false,
+      "metric": "lastCycleLossCount",
+      "operator": "LTE",
+      "value": 3,
+      "referenceMetric": null,
+      "action": "PLAY",
+      "createdAt": "2026-08-13T11:09:47.766Z",
+      "updatedAt": "2026-08-13T19:28:43.145Z"
+    }
+  ]
+}
