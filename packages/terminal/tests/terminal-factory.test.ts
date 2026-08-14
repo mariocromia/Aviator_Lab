@@ -22,7 +22,7 @@ describe('terminal factory', () => {
       name: 'Terminal Alpha', platformId: crypto.randomUUID(),
       gameStrategyId: crypto.randomUUID(), betStrategyId: crypto.randomUUID(),
       betPlanId: crypto.randomUUID(), screenProfileId: null,
-      mode: 'SIMULATION', enabled: true, paused: false, historyDisplayLimit:200,operationCombinations:[{id:'llw',name:'LLW',priority:10,enabled:true,betStrategyId:crypto.randomUUID(),betPlanId:crypto.randomUUID(),behavior:'REPEAT_UNTIL_LOSS'}], initialBankrollCents: 25_000
+      mode: 'SIMULATION', enabled: true, paused: false, historyDisplayLimit:200,operationCombinations:[{id:'llw',name:'LLW',priority:10,enabled:true,triggerType:'PATTERN',pattern:'LLW',betStrategyId:crypto.randomUUID(),lossReentryType:'PATTERN',lossReentryPattern:'W',lossReentryBetStrategyId:null,betPlanId:crypto.randomUUID(),behavior:'REPEAT_UNTIL_LOSS'}], initialBankrollCents: 25_000
     }, crypto.randomUUID(), now);
     source.currentBankrollCents = 31_400;
     source.gameWins = 12;

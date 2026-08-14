@@ -14,7 +14,7 @@ describe('Terminal presets',()=>{
     const database=new AppDatabase(path.join(directory,'app.db'));
     expect(database.bootstrap().terminalHistoryDisplayMax).toBe(200);
     const terminal=database.listTerminals()[0];
-    terminal.historyDisplayLimit=100;terminal.operationCombinations=[{id:'llw',name:'LLW até LOSS',priority:10,enabled:true,betStrategyId:terminal.betStrategyWinId,betPlanId:terminal.betPlanWinId,behavior:'REPEAT_UNTIL_LOSS'}];database.updateTerminal(terminal);
+    terminal.historyDisplayLimit=100;terminal.operationCombinations=[{id:'llw',name:'LLW até LOSS',priority:10,enabled:true,triggerType:'PATTERN',pattern:'LLW',betStrategyId:terminal.betStrategyWinId,lossReentryType:'PATTERN',lossReentryPattern:'W',lossReentryBetStrategyId:null,betPlanId:terminal.betPlanWinId,behavior:'REPEAT_UNTIL_LOSS'}];database.updateTerminal(terminal);
     const originalGame=database.listConfigurationDocuments('GAME_STRATEGY').find(item=>item.id===terminal.gameStrategyId)!;
     const preset=database.saveTerminalPreset(terminal.id,'Snapshot protegido');
     database.saveConfiguration({id:originalGame.id,kind:'GAME_STRATEGY',name:'Alterada',sortOrder:originalGame.sortOrder,config:{trigger:[{operator:'GT',value:50}],win:[{operator:'GTE',value:90}],loss:[{operator:'LT',value:90}],afterLoss:[],release:[{operator:'GTE',value:90}]}});

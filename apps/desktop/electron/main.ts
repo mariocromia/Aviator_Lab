@@ -487,14 +487,14 @@ function preloadTerminalHistory(terminalId:string){
 function preloadTerminalTree(terminalId:string,visited=new Set<string>()){if(visited.has(terminalId))return;visited.add(terminalId);preloadTerminalHistory(terminalId);for(const dependent of database.listTerminals().filter(item=>item.strategySourceTerminalId===terminalId))preloadTerminalTree(dependent.id,visited);}
 
 function terminalAnalysisConfigurationChanged(previous:Terminal,current:Terminal){
-  return previous.platformId!==current.platformId||previous.gameStrategyId!==current.gameStrategyId||previous.strategySourceTerminalId!==current.strategySourceTerminalId||previous.betStrategyWinId!==current.betStrategyWinId||previous.betStrategyLossId!==current.betStrategyLossId||previous.betPlanWinId!==current.betPlanWinId||previous.betPlanLossId!==current.betPlanLossId||JSON.stringify(previous.operationCombinations)!==JSON.stringify(current.operationCombinations)||!sameIds(previous.controlPlayRuleIds,current.controlPlayRuleIds)||!sameIds(previous.controlPauseRuleIds,current.controlPauseRuleIds);
+  return previous.platformId!==current.platformId||previous.gameStrategyId!==current.gameStrategyId||previous.strategySourceTerminalId!==current.strategySourceTerminalId||previous.strategySourceMode!==current.strategySourceMode||previous.betStrategyWinId!==current.betStrategyWinId||previous.betStrategyLossId!==current.betStrategyLossId||previous.betPlanWinId!==current.betPlanWinId||previous.betPlanLossId!==current.betPlanLossId||JSON.stringify(previous.entryBlockPatterns)!==JSON.stringify(current.entryBlockPatterns)||JSON.stringify(previous.operationCombinations)!==JSON.stringify(current.operationCombinations)||!sameIds(previous.controlPlayRuleIds,current.controlPlayRuleIds)||!sameIds(previous.controlPauseRuleIds,current.controlPauseRuleIds);
 }
 
 function sameIds(left:string[],right:string[]){const sortedLeft=[...left].sort();const sortedRight=[...right].sort();return sortedLeft.length===sortedRight.length&&sortedLeft.every((id,index)=>id===sortedRight[index]);}
 
 function terminalUsesConfiguration(terminal:Terminal,configurationId:string,kind:ConfigurationKind){
   if(kind==='GAME_STRATEGY')return terminal.gameStrategyId===configurationId;
-  if(kind==='BET_STRATEGY')return terminal.betStrategyWinId===configurationId||terminal.betStrategyLossId===configurationId||terminal.operationCombinations.some(item=>item.betStrategyId===configurationId);
+  if(kind==='BET_STRATEGY')return terminal.betStrategyWinId===configurationId||terminal.betStrategyLossId===configurationId||terminal.operationCombinations.some(item=>item.betStrategyId===configurationId||item.lossReentryBetStrategyId===configurationId);
   if(kind==='BET_PLAN')return terminal.betPlanWinId===configurationId||terminal.betPlanLossId===configurationId||terminal.operationCombinations.some(item=>item.betPlanId===configurationId);
   return false;
 }

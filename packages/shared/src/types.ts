@@ -128,7 +128,9 @@ export interface TerminalHistoryItem {
   terminalId: string;
   createdAt: string;
   occurredAt?: string;
-  gameResult: GameSignalResult;
+  /** Resultado exibido pelo Terminal. Em Terminais dependentes, vem da aposta
+   * liquidada; TIE evita transformar empate financeiro em LOSS. */
+  gameResult: GameSignalResult | 'TIE';
   multiplier: number | null;
   decisionAction: BetAction | null;
   stage: BetStageEvent | null;
@@ -361,6 +363,7 @@ export interface Terminal {
   platformId: string;
   gameStrategyId: string;
   strategySourceTerminalId: string | null;
+  strategySourceMode: 'GAME_SIGNALS' | 'BET_EXECUTIONS';
   betStrategyId: string;
   betStrategyWinId: string;
   betStrategyLossId: string;
@@ -374,6 +377,7 @@ export interface Terminal {
   enabled: boolean;
   paused: boolean;
   historyDisplayLimit: number;
+  entryBlockPatterns: string[];
   operationCombinations: TerminalOperationCombination[];
   initialBankrollCents: number;
   currentBankrollCents: number;
@@ -388,7 +392,12 @@ export interface TerminalOperationCombination {
   name: string;
   priority: number;
   enabled: boolean;
+  triggerType: 'PATTERN' | 'BET_STRATEGY';
+  pattern: string | null;
   betStrategyId: string;
+  lossReentryType: 'IMMEDIATE' | 'PATTERN' | 'BET_STRATEGY';
+  lossReentryPattern: string | null;
+  lossReentryBetStrategyId: string | null;
   betPlanId: string;
   behavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS';
 }
@@ -439,7 +448,7 @@ export interface TerminalRuntime {
   gameStrategyRuntime: { state: GameStrategyState; processedRounds: number; lastMultiplier: number | null; triggerRoundId: string | null; releaseProgress: number; lastAnnotationRole?: RoundAnnotationRole | null };
   resultAnalyzerState: ResultAnalyzerState;
   betStrategyRuntime: { lastDecisionId: string | null; lastAction: BetAction | null; decisionCount: number; entryCount: number; ignoredCount: number };
-  galeRuntime: { active: boolean; currentStage: number; cycleId: string | null; activeBetPlanId: string | null; activeCombinationId?:string|null; onWinBetPlanId: string | null; followUp: boolean; followUpBehavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS'; triggerLossStreakTarget?: number | null; triggerLossProgress?:number; previousAmountCents?: number; accumulatedLossCents?: number; waitingSignals?: number; entryConfirmed?:boolean; failedCycleAttempts?:number; preparedLegAmountsCents?: number[]; currentCycleWinCount?:number; currentCycleLossCount?:number; lastCycleWinCount?:number; lastCycleLossCount?:number };
+  galeRuntime: { active: boolean; currentStage: number; cycleId: string | null; activeBetPlanId: string | null; activeCombinationId?:string|null; onWinBetPlanId: string | null; followUp: boolean; followUpBehavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS'; triggerLossStreakTarget?: number | null; triggerLossProgress?:number; previousAmountCents?: number; accumulatedLossCents?: number; waitingSignals?: number; entryConfirmed?:boolean; failedCycleAttempts?:number; preparedLegAmountsCents?: number[]; currentCycleWinCount?:number; currentCycleLossCount?:number; lastCycleWinCount?:number; lastCycleLossCount?:number; operationalPreparationKey?:string|null };
   bankrollState: BankrollMetrics;
   screenControllerState: { status: 'IDLE' | 'READY' | 'MOCKING' | 'PREPARING' | 'PAUSED' | 'INVALID' | 'ERROR'; paused: boolean };
   scheduleState: { allowed: boolean; reason: string | null; checkedAt: string | null };

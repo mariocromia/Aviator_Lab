@@ -6,7 +6,7 @@ export const loginInputSchema = z.object({
 });
 
 export const terminalModeSchema = z.enum(['SIMULATION', 'ASSISTED']);
-const terminalOperationCombinationSchema=z.object({id:z.string().min(1).max(100),name:z.string().trim().min(2).max(100),priority:z.number().int().min(0).max(999_999),enabled:z.boolean(),betStrategyId:z.string().uuid(),betPlanId:z.string().uuid(),behavior:z.enum(['RUN_ONCE','REPEAT_UNTIL_LOSS'])});
+const terminalOperationCombinationSchema=z.object({id:z.string().min(1).max(100),name:z.string().trim().min(2).max(100),priority:z.number().int().min(0).max(999_999),enabled:z.boolean(),triggerType:z.enum(['PATTERN','BET_STRATEGY']).default('BET_STRATEGY'),pattern:z.string().trim().toUpperCase().regex(/^[WL]+$/,'Use somente W e L na sequência.').max(100).nullable().default(null),betStrategyId:z.string().uuid(),lossReentryType:z.enum(['IMMEDIATE','PATTERN','BET_STRATEGY']).default('BET_STRATEGY'),lossReentryPattern:z.string().trim().toUpperCase().regex(/^[WL]+$/,'Use somente W e L na sequência.').max(100).nullable().default(null),lossReentryBetStrategyId:z.string().uuid().nullable().default(null),betPlanId:z.string().uuid(),behavior:z.enum(['RUN_ONCE','REPEAT_UNTIL_LOSS'])}).superRefine((value,context)=>{if(value.triggerType==='PATTERN'&&!value.pattern)context.addIssue({code:'custom',path:['pattern'],message:'Digite a sequência W/L desta combinação.'});if(value.lossReentryType==='PATTERN'&&!value.lossReentryPattern)context.addIssue({code:'custom',path:['lossReentryPattern'],message:'Digite a sequência W/L para reentrada após LOSS.'});});
 
 export const createTerminalInputSchema = z.object({
   name: z.string().trim().min(2).max(80),
@@ -14,6 +14,7 @@ export const createTerminalInputSchema = z.object({
   platformId: z.string().uuid(),
   gameStrategyId: z.string().uuid(),
   strategySourceTerminalId:z.string().uuid().nullable().default(null),
+  strategySourceMode:z.enum(['GAME_SIGNALS','BET_EXECUTIONS']).default('GAME_SIGNALS'),
   betStrategyId: z.string().uuid(),
   betStrategyWinId: z.string().uuid().optional(),
   betStrategyLossId: z.string().uuid().optional(),
@@ -23,6 +24,7 @@ export const createTerminalInputSchema = z.object({
   controlPlayRuleIds:z.array(z.string().uuid()).max(100).default([]),controlPauseRuleIds:z.array(z.string().uuid()).max(100).default([]),
   mode: terminalModeSchema.default('SIMULATION'),
   historyDisplayLimit: z.number().int().min(10).max(500).default(200),
+  entryBlockPatterns:z.array(z.string().trim().toUpperCase().regex(/^[WL]+$/,'Use somente W e L na sequência bloqueada.').max(100)).max(100).default([]),
   operationCombinations:z.array(terminalOperationCombinationSchema).max(100).default([]),
   initialBankrollCents: z.number().int().nonnegative().max(1_000_000_000)
 });
@@ -40,6 +42,7 @@ export const updateTerminalInputSchema = z.object({
   platformId: z.string().uuid(),
   gameStrategyId: z.string().uuid(),
   strategySourceTerminalId:z.string().uuid().nullable().default(null),
+  strategySourceMode:z.enum(['GAME_SIGNALS','BET_EXECUTIONS']).default('GAME_SIGNALS'),
   betStrategyId: z.string().uuid(),
   betStrategyWinId: z.string().uuid().optional(),
   betStrategyLossId: z.string().uuid().optional(),
@@ -49,6 +52,7 @@ export const updateTerminalInputSchema = z.object({
   controlPlayRuleIds:z.array(z.string().uuid()).max(100).default([]),controlPauseRuleIds:z.array(z.string().uuid()).max(100).default([]),
   mode: terminalModeSchema,
   historyDisplayLimit: z.number().int().min(10).max(500).default(200),
+  entryBlockPatterns:z.array(z.string().trim().toUpperCase().regex(/^[WL]+$/,'Use somente W e L na sequência bloqueada.').max(100)).max(100).default([]),
   operationCombinations:z.array(terminalOperationCombinationSchema).max(100).default([])
 });
 
@@ -105,7 +109,7 @@ export const aiSettingsInputSchema=z.object({apiKey:z.string().trim().min(10).ma
 export const aiChatRequestSchema=z.object({platformId:z.string().uuid().nullable(),terminalId:z.string().uuid().nullable(),historyLimit:z.union([z.literal(50),z.literal(100),z.literal(250),z.literal(500),z.literal(1_000),z.literal(2_500),z.literal(5_000),z.literal(10_000)]),messages:z.array(z.object({role:z.enum(['user','assistant']),content:z.string().trim().min(1).max(8_000)})).max(20),prompt:z.string().trim().min(1).max(8_000).nullable(),audio:z.object({data:z.string().min(10).max(15_000_000),format:z.enum(['webm','wav','mp3','ogg','m4a'])}).nullable()}).superRefine((value,context)=>{if(!value.platformId&&!value.terminalId)context.addIssue({code:'custom',message:'Selecione uma plataforma ou Terminal.'});if(!value.prompt&&!value.audio)context.addIssue({code:'custom',message:'Informe uma mensagem de texto ou áudio.'});});
 
 const platformArchiveSchema = createPlatformInputSchema.extend({ id: z.string().uuid(), enabled: z.boolean(), sourceType: z.literal('TIPMINER'), collectorStatus: z.enum(['ONLINE','OFFLINE','DEGRADED']), createdAt: z.string(), updatedAt: z.string() });
-const terminalArchiveSchema = z.object({ id:z.string().uuid(),name:z.string(),sortOrder:z.number().int().default(0),platformId:z.string().uuid(),gameStrategyId:z.string(),strategySourceTerminalId:z.string().nullable().default(null),betStrategyId:z.string(),betStrategyWinId:z.string().optional(),betStrategyLossId:z.string().optional(),betPlanId:z.string(),betPlanWinId:z.string().optional(),betPlanLossId:z.string().optional(),controlPlayRuleIds:z.array(z.string()).default([]),controlPauseRuleIds:z.array(z.string()).default([]),screenProfileId:z.string().nullable(),mode:terminalModeSchema,enabled:z.boolean(),paused:z.boolean(),historyDisplayLimit:z.number().int().min(10).max(500).default(200),operationCombinations:z.array(terminalOperationCombinationSchema).default([]),initialBankrollCents:z.number().int(),currentBankrollCents:z.number().int(),gameWins:z.number().int(),gameLosses:z.number().int(),createdAt:z.string(),updatedAt:z.string() }).transform(value=>({...value,betStrategyWinId:value.betStrategyWinId??value.betStrategyId,betStrategyLossId:value.betStrategyLossId??value.betStrategyId,betPlanWinId:value.betPlanWinId??value.betPlanId,betPlanLossId:value.betPlanLossId??value.betPlanId}));
+const terminalArchiveSchema = z.object({ id:z.string().uuid(),name:z.string(),sortOrder:z.number().int().default(0),platformId:z.string().uuid(),gameStrategyId:z.string(),strategySourceTerminalId:z.string().nullable().default(null),strategySourceMode:z.enum(['GAME_SIGNALS','BET_EXECUTIONS']).default('GAME_SIGNALS'),betStrategyId:z.string(),betStrategyWinId:z.string().optional(),betStrategyLossId:z.string().optional(),betPlanId:z.string(),betPlanWinId:z.string().optional(),betPlanLossId:z.string().optional(),controlPlayRuleIds:z.array(z.string()).default([]),controlPauseRuleIds:z.array(z.string()).default([]),screenProfileId:z.string().nullable(),mode:terminalModeSchema,enabled:z.boolean(),paused:z.boolean(),historyDisplayLimit:z.number().int().min(10).max(500).default(200),entryBlockPatterns:z.array(z.string().trim().toUpperCase().regex(/^[WL]+$/).max(100)).max(100).default([]),operationCombinations:z.array(terminalOperationCombinationSchema).default([]),initialBankrollCents:z.number().int(),currentBankrollCents:z.number().int(),gameWins:z.number().int(),gameLosses:z.number().int(),createdAt:z.string(),updatedAt:z.string() }).transform(value=>({...value,betStrategyWinId:value.betStrategyWinId??value.betStrategyId,betStrategyLossId:value.betStrategyLossId??value.betStrategyId,betPlanWinId:value.betPlanWinId??value.betPlanId,betPlanLossId:value.betPlanLossId??value.betPlanId}));
 const profileArchiveSchema = saveScreenProfileInputSchema.extend({ id:z.string(),updatedAt:z.string() });
 const namedConfigurationSchema = z.object({id:z.string(),name:z.string(),sortOrder:z.number().int().default(0),config:z.unknown()});
 export const workspaceArchiveSchema = z.object({ format:z.literal('AVIATOR_STRATEGY_LAB'),version:z.union([z.literal(1),z.literal(2)]),exportedAt:z.string(),platforms:z.array(platformArchiveSchema),terminals:z.array(terminalArchiveSchema),screenProfiles:z.array(profileArchiveSchema),gameStrategies:z.array(namedConfigurationSchema),betStrategies:z.array(namedConfigurationSchema),betPlans:z.array(namedConfigurationSchema),schedulePlans:z.array(namedConfigurationSchema).optional(),terminalSchedules:z.array(z.object({terminalId:z.string(),schedulePlanId:z.string(),mode:z.enum(['ALWAYS','ALLOW_WINDOWS','BLOCK_WINDOWS']),timezone:z.string(),windows:z.array(terminalScheduleWindowSchema),updatedAt:z.string()})).optional(),terminalControlRules:z.array(z.object({id:z.string(),name:z.string(),sortOrder:z.number().int().default(0),enabled:z.boolean(),metric:terminalControlMetricSchema,operator:terminalControlOperatorSchema,value:z.number(),referenceMetric:terminalControlMetricSchema.nullable().optional().default(null),action:z.enum(['PAUSE','PLAY','RESUME']).transform(value=>value==='RESUME'?'PLAY' as const:value),createdAt:z.string(),updatedAt:z.string()})).optional() });

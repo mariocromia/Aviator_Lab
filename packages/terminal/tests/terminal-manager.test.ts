@@ -28,6 +28,7 @@ class MemoryRepository implements TerminalRuntimeRepository {
   saveRoundAnnotation(annotation: RoundAnnotation) { this.annotations.push(annotation); }
   saveGameSignal(signal: GameSignal) { this.signals.push(signal); }
   getTerminalGameSignalByRound(terminalId:string,roundId:string){return[...this.signals].reverse().find((signal:GameSignal)=>signal.terminalId===terminalId&&signal.resultRoundId===roundId)??null;}
+  getTerminalBetExecutionByRound(terminalId:string,roundId:string){const signal=this.getTerminalGameSignalByRound(terminalId,roundId);return signal?[...this.executions].reverse().find(execution=>execution.terminalId===terminalId&&execution.gameSignalId===signal.id)??null:null;}
   getBetStrategyConfig(id:string) { return this.betStrategyConfigs.get(id)??this.betStrategyConfig; }
   saveBetDecision(decision: BetDecision) { this.decisions.push(decision); }
   updateTerminalGameStats(id: string, wins: number, losses: number) { const terminal = this.terminals.get(id); if (terminal) { terminal.gameWins = wins; terminal.gameLosses = losses; } }
@@ -153,12 +154,12 @@ describe('TerminalManager', () => {
     expect(()=>manager.updateTerminal(principal.id,{...principal,strategySourceTerminalId:dependent.id})).toThrow('ciclo');
   });
 
-  it('selects the highest-priority source-pattern combination and repeats its own plan until source LOSS',async()=>{
+  it('selects the highest-priority source-pattern combination and repeats until its own bet LOSS',async()=>{
     const repository=new MemoryRepository();const source=makeTerminal('Fonte');const dependent=makeTerminal('Operacional');dependent.strategySourceTerminalId=source.id;
     const strategyLlw=crypto.randomUUID();const strategyLw=crypto.randomUUID();const planLlw=crypto.randomUUID();const planLw=crypto.randomUUID();
     dependent.operationCombinations=[
-      {id:'llw',name:'LLW até LOSS',priority:10,enabled:true,betStrategyId:strategyLlw,betPlanId:planLlw,behavior:'REPEAT_UNTIL_LOSS'},
-      {id:'lw',name:'LW até LOSS',priority:20,enabled:true,betStrategyId:strategyLw,betPlanId:planLw,behavior:'REPEAT_UNTIL_LOSS'}
+      {id:'llw',name:'LLW até LOSS',priority:10,enabled:true,triggerType:'BET_STRATEGY',pattern:null,betStrategyId:strategyLlw,lossReentryType:'BET_STRATEGY',lossReentryPattern:null,lossReentryBetStrategyId:null,betPlanId:planLlw,behavior:'REPEAT_UNTIL_LOSS'},
+      {id:'lw',name:'LW até LOSS',priority:20,enabled:true,triggerType:'BET_STRATEGY',pattern:null,betStrategyId:strategyLw,lossReentryType:'BET_STRATEGY',lossReentryPattern:null,lossReentryBetStrategyId:null,betPlanId:planLw,behavior:'REPEAT_UNTIL_LOSS'}
     ];
     repository.betStrategyConfigs.set(strategyLlw,{rules:[{id:'pattern-llw',name:'LLW',enabled:true,priority:1,conditions:[{field:'recentPattern',operator:'MATCHES',value:'LLW'}],action:'ENTER'}]});
     repository.betStrategyConfigs.set(strategyLw,{rules:[{id:'pattern-lw',name:'LW',enabled:true,priority:1,conditions:[{field:'recentPattern',operator:'MATCHES',value:'LW'}],action:'ENTER'}]});
@@ -167,7 +168,68 @@ describe('TerminalManager', () => {
     expect(repository.decisions.filter(item=>item.terminalId===dependent.id&&item.action==='ENTER').at(0)?.metadata).toMatchObject({operationCombinationId:'llw'});
     expect(preparedPlans.every(id=>id===planLlw)).toBe(true);
     expect(repository.executions.filter(item=>item.terminalId===dependent.id).map(item=>item.result)).toEqual(['WIN','LOSS']);
+    expect(repository.getTerminal(dependent.id)).toMatchObject({gameWins:1,gameLosses:1});
     expect(manager.getRuntime(dependent.id)?.galeRuntime.active).toBe(false);
+  });
+
+  it('accepts a typed W/L trigger and waits for a different typed pattern before Gale reentry',async()=>{
+    const repository=new MemoryRepository();const source=makeTerminal('Fonte direta');const dependent=makeTerminal('Padrões digitados');dependent.strategySourceTerminalId=source.id;
+    dependent.operationCombinations=[{id:'direct',name:'LLW e reentrada W',priority:10,enabled:true,triggerType:'PATTERN',pattern:'LLW',betStrategyId:dependent.betStrategyId,lossReentryType:'PATTERN',lossReentryPattern:'W',lossReentryBetStrategyId:null,betPlanId:dependent.betPlanId,behavior:'RUN_ONCE'}];
+    repository.betPlanConfig={stages:[{index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:2}]},{index:1,label:'GALE 1',execution:{policy:'AFTER_ENTRY_CONFIRMATION'},legs:[{slot:1,amountCents:200,cashout:2}]}]};
+    repository.saveTerminal(source);repository.saveTerminal(dependent);const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    for(const multiplier of[1.72,1.25,2.27,1.25,2.27,2.5,1.72,1.25,2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.executions.filter(item=>item.terminalId===dependent.id).map(item=>item.result)).toEqual(['LOSS']);
+    expect(manager.getRuntime(dependent.id)?.galeRuntime).toMatchObject({active:true,currentStage:1,entryConfirmed:false});
+    for(const multiplier of[2.27,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(manager.getRuntime(dependent.id)?.galeRuntime.entryConfirmed).toBe(true);
+    expect(repository.decisions.filter(item=>item.terminalId===dependent.id).at(-1)?.metadata).toMatchObject({pattern:'W',reentryAfterLoss:true,matched:true});
+    for(const multiplier of[1.72,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.executions.filter(item=>item.terminalId===dependent.id).map(item=>item.result)).toEqual(['LOSS','WIN']);
+  });
+
+  it('enters BASE with the copy and advances G1 through G3 on every following physical round',async()=>{
+    const repository=new MemoryRepository();const copy=makeTerminal('Cópia operacional');copy.enabled=false;
+    const third=makeTerminal('Terminal 03');third.strategySourceTerminalId=copy.id;third.strategySourceMode='BET_EXECUTIONS';
+    third.entryBlockPatterns=['L'];
+    third.operationCombinations=[{id:'after-copy-win',name:'Após W da cópia',priority:1,enabled:true,triggerType:'PATTERN',pattern:'W',betStrategyId:third.betStrategyId,lossReentryType:'IMMEDIATE',lossReentryPattern:null,lossReentryBetStrategyId:null,betPlanId:third.betPlanId,behavior:'RUN_ONCE'}];
+    repository.betPlanConfig={stages:[
+      {index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:2}]},
+      {index:1,label:'GALE 1',legs:[{slot:1,amountCents:200,cashout:2}]},
+      {index:2,label:'GALE 2',legs:[{slot:1,amountCents:400,cashout:2}]},
+      {index:3,label:'GALE 3',legs:[{slot:1,amountCents:800,cashout:2}]}
+    ]};
+    repository.saveTerminal(copy);repository.saveTerminal(third);const preparations:number[]=[];const manager=new TerminalManager(repository,new RoundEventBus());manager.setAssistedPreparationHandler(request=>{if(request.terminalId===third.id)preparations.push(request.stageIndex)});manager.initialize();
+    const publishSourceOperation=async(multiplier:number,result:BetExecution['result'])=>{const round=makeRound(multiplier);const signal:GameSignal={id:crypto.randomUUID(),terminalId:copy.id,platformId:copy.platformId,strategyId:copy.gameStrategyId,triggerRoundId:round.id,resultRoundId:round.id,result:result==='LOSS'?'LOSS':'WIN',metadata:{multiplier},createdAt:round.occurredAt};repository.signals.push(signal);repository.executions.push({id:crypto.randomUUID(),cycleId:crypto.randomUUID(),terminalId:copy.id,gameSignalId:signal.id,stageIndex:0,stageLabel:'BASE',multiplier,stakeCents:100,returnedCents:result==='LOSS'?0:200,profitLossCents:result==='LOSS'?-100:100,bankrollBeforeCents:10_000,bankrollAfterCents:result==='LOSS'?9_900:10_100,result,createdAt:round.occurredAt});await manager.routeRoundToTerminals(round);};
+    await publishSourceOperation(1.2,'LOSS');
+    expect(manager.getRuntime(third.id)?.galeRuntime).toMatchObject({active:true,currentStage:1});
+    await manager.routeRoundToTerminals(makeRound(1.1));
+    expect(manager.getRuntime(third.id)?.galeRuntime).toMatchObject({active:true,currentStage:2});
+    await manager.routeRoundToTerminals(makeRound(1.3));
+    expect(manager.getRuntime(third.id)?.galeRuntime).toMatchObject({active:true,currentStage:3});
+    await manager.routeRoundToTerminals(makeRound(2.5));
+    expect(repository.executions.filter(item=>item.terminalId===third.id).map(item=>({stage:item.stageIndex,result:item.result}))).toEqual([{stage:0,result:'LOSS'},{stage:1,result:'LOSS'},{stage:2,result:'LOSS'},{stage:3,result:'WIN'}]);
+    expect(preparations).toEqual([0,1,2,3]);
+    expect(manager.getRuntime(third.id)?.galeRuntime.active).toBe(false);
+    await manager.routeRoundToTerminals(makeRound(8.8));
+    expect(repository.executions.filter(item=>item.terminalId===third.id)).toHaveLength(4);
+  });
+
+  it('blocks a new operational BASE when recent history ends with a prohibited W/L sequence',async()=>{
+    const repository=new MemoryRepository();const copy=makeTerminal('Cópia com bloqueio');copy.enabled=false;const third=makeTerminal('Terminal bloqueado em LWL');third.strategySourceTerminalId=copy.id;third.strategySourceMode='BET_EXECUTIONS';third.entryBlockPatterns=['LWL'];
+    repository.saveTerminal(copy);repository.saveTerminal(third);const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();manager.getRuntime(third.id)!.resultAnalyzerState.recentPattern='WWWLWL';
+    const round=makeRound(2.5);const signal:GameSignal={id:crypto.randomUUID(),terminalId:copy.id,platformId:copy.platformId,strategyId:copy.gameStrategyId,triggerRoundId:round.id,resultRoundId:round.id,result:'WIN',metadata:{multiplier:2.5},createdAt:round.occurredAt};repository.signals.push(signal);repository.executions.push({id:crypto.randomUUID(),cycleId:crypto.randomUUID(),terminalId:copy.id,gameSignalId:signal.id,stageIndex:0,stageLabel:'BASE',multiplier:2.5,stakeCents:100,returnedCents:200,profitLossCents:100,bankrollBeforeCents:10_000,bankrollAfterCents:10_100,result:'WIN',createdAt:round.occurredAt});
+    await manager.routeRoundToTerminals(round);
+    expect(repository.executions.filter(item=>item.terminalId===third.id)).toHaveLength(0);
+    expect(manager.getRuntime(third.id)?.galeRuntime.active).toBe(false);
+  });
+
+  it('prepares BASE before an imminent copy operation',async()=>{
+    const repository=new MemoryRepository();const root=makeTerminal('Terminal 01');root.enabled=false;const copy=makeTerminal('Cópia');copy.enabled=false;copy.strategySourceTerminalId=root.id;const third=makeTerminal('Terminal 03 físico');third.strategySourceTerminalId=copy.id;third.strategySourceMode='BET_EXECUTIONS';third.mode='ASSISTED';
+    repository.saveTerminal(root);repository.saveTerminal(copy);repository.saveTerminal(third);const preparations:Array<{terminalId:string;stageIndex:number}>=[];const manager=new TerminalManager(repository,new RoundEventBus());manager.setAssistedPreparationHandler(request=>{preparations.push({terminalId:request.terminalId,stageIndex:request.stageIndex});});manager.initialize();
+    const rootRuntime=manager.getRuntime(root.id)!;rootRuntime.gameStrategyRuntime.lastAnnotationRole='TRIGGER';
+    const copyRuntime=manager.getRuntime(copy.id)!;copyRuntime.galeRuntime.active=true;copyRuntime.galeRuntime.cycleId=crypto.randomUUID();copyRuntime.galeRuntime.activeBetPlanId=copy.betPlanId;
+    await manager.routeRoundToTerminals(makeRound(3.2));
+    expect(preparations).toEqual([{terminalId:third.id,stageIndex:0}]);
   });
 
   it('replays all supplied historical rounds so the UI can retain the latest 500 calculated signals',()=>{
