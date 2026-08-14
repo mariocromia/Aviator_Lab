@@ -29,11 +29,18 @@ describe('Histórico de Terminal dependente',()=>{
     database.saveBetStageEvent({id:randomUUID(),cycleId,terminalId:dependent.id,gameSignalId:signals[2].id,stageIndex:0,stageLabel:'BASE',result:'WIN',createdAt:signals[2].createdAt});
     database.saveBetExecution({id:randomUUID(),cycleId,terminalId:dependent.id,gameSignalId:signals[2].id,stageIndex:0,stageLabel:'BASE',multiplier:1.8,stakeCents:100,returnedCents:180,profitLossCents:80,bankrollBeforeCents:10_000,bankrollAfterCents:10_080,result:'WIN',createdAt:signals[2].createdAt});
 
+    const tieRound=round(source.platformId,2);database.insertRound(tieRound);
+    const tieSignal:GameSignal={id:randomUUID(),terminalId:dependent.id,platformId:dependent.platformId,strategyId:dependent.gameStrategyId,triggerRoundId:tieRound.id,resultRoundId:tieRound.id,result:'WIN',metadata:{multiplier:2},createdAt:new Date(Date.now()+4).toISOString()};
+    database.saveGameSignal(tieSignal);
+    database.saveBetStageEvent({id:randomUUID(),cycleId:randomUUID(),terminalId:dependent.id,gameSignalId:tieSignal.id,stageIndex:1,stageLabel:'GALE 1',result:'TIE',createdAt:tieSignal.createdAt});
+    database.saveBetExecution({id:randomUUID(),cycleId:randomUUID(),terminalId:dependent.id,gameSignalId:tieSignal.id,stageIndex:1,stageLabel:'GALE 1',multiplier:2,stakeCents:200,returnedCents:200,profitLossCents:0,bankrollBeforeCents:10_080,bankrollAfterCents:10_080,result:'TIE',createdAt:tieSignal.createdAt});
+
     const history=database.getTerminalHistory(dependent.id,200);
-    expect(history).toHaveLength(2);
+    expect(history).toHaveLength(3);
     expect(history.map(item=>({result:item.gameResult,decision:item.decisionAction,bet:item.execution?.result??null}))).toEqual([
       {result:'LOSS',decision:'ENTER',bet:null},
-      {result:'WIN',decision:null,bet:'WIN'}
+      {result:'WIN',decision:null,bet:'WIN'},
+      {result:'TIE',decision:null,bet:'TIE'}
     ]);
     expect(database.getTerminal(dependent.id)).toMatchObject({gameWins:1,gameLosses:0});
     database.close();

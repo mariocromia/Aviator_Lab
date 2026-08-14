@@ -15,6 +15,7 @@ describe('terminal factory', () => {
     expect(terminal.gameWins).toBe(0);
     expect(terminal.gameLosses).toBe(0);
     expect(terminal.historyDisplayLimit).toBe(200);
+    expect(terminal.analysisRoundLimit).toBe(1_000);
   });
 
   it('duplicates configuration but never operational state or identity', () => {
@@ -33,6 +34,7 @@ describe('terminal factory', () => {
     expect(copy.gameWins).toBe(0);
     expect(copy.paused).toBe(true);
     expect(copy.historyDisplayLimit).toBe(200);
+    expect(copy.analysisRoundLimit).toBe(source.analysisRoundLimit);
     expect(copy.operationCombinations).toEqual(source.operationCombinations);
     expect(copy.operationCombinations).not.toBe(source.operationCombinations);
   });

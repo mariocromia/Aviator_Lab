@@ -78,7 +78,7 @@ export class SimulationEngine {
                 activeStage = null;activePlan=null;entryConfirmed=false;
               } else if(stageResult==='TIE'){
                 if(activePlan?.continueOnTie!==false&&activeStage+1<(activePlan?.stages.length??0)){activeStage++;entryConfirmed=false;stageAdvancedThisSignal=true;}
-                else{failedCycleAttempts=nextFailedCycleAttempt(failedCycleAttempts,activePlan);activeStage=null;activePlan=null;entryConfirmed=false;}
+                else{failedCycleAttempts=0;activeStage=null;activePlan=null;entryConfirmed=false;}
               } else if (activeStage + 1 < (activePlan?.stages.length??0)){activeStage++;entryConfirmed=false;stageAdvancedThisSignal=true;}
               else { counters.lossFinal++;failedCycleAttempts=nextFailedCycleAttempt(failedCycleAttempts,activePlan); activeStage = null;activePlan=null; }
             } else { counters.lossFinal++; stageLabel = stage.label; stageResult = 'LOSS';failedCycleAttempts=nextFailedCycleAttempt(failedCycleAttempts,activePlan); activeStage = null;activePlan=null; }

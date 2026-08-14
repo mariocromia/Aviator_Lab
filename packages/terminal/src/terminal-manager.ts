@@ -6,6 +6,7 @@ import { ResultAnalyzer, createResultAnalyzerState } from '@aviator/result-analy
 import { BetStrategyEngine, bankrollStopReason, calculateBetAmount, createBankrollMetrics, updateBankrollMetrics } from '@aviator/bet-strategy';
 import { createTerminal, duplicateTerminal, type TerminalDraft } from './terminal-factory.js';
 import { evaluateTerminalSchedule } from './terminal-schedule.js';
+import { createSequenceAiRuntime, normalizeSequenceAiRuntime, observeSequenceResult, predictSequence } from './sequence-pattern-intelligence.js';
 
 export interface TerminalRuntimeRepository {
   listTerminals(): Terminal[];
@@ -159,6 +160,32 @@ export class TerminalManager {
     if(runtime.status==='RUNNING')this.attach(terminal);
     return processed;
   }
+  async rebuildTerminalFromHistoryChunked(id:string,rounds:NormalizedRound[],options?:{chunkSize?:number;onProgress?:(progress:number)=>void;catchUpRounds?:()=>NormalizedRound[]}):Promise<number>{
+    const terminal=this.repository.getTerminal(id);if(!terminal)return 0;
+    this.unsubscribeByTerminal.get(id)?.();this.unsubscribeByTerminal.delete(id);
+    this.repository.clearTerminalCalculatedHistory(id);
+    this.repository.updateTerminalBankroll(id,terminal.initialBankrollCents);
+    const runtime=createRuntime(terminal);
+    runtime.status='RUNNING';runtime.pauseState={type:'NONE',reason:null,ruleId:null,sourceTerminalId:null};
+    runtime.bankrollState=createBankrollMetrics(terminal.initialBankrollCents);this.runtimes.set(id,runtime);this.repository.saveTerminalRuntime(runtime);
+    const chunkSize=Math.max(25,options?.chunkSize??100);let processed=0;let cursor=0;
+    const processBatch=(batch:NormalizedRound[])=>{for(const sourceRound of batch){
+      const round={...sourceRound,platformId:terminal.platformId,deliveryMode:'BACKLOG' as const};
+      const before=runtime.gameStrategyRuntime.processedRounds;
+      this.processRound(id,{id:`preload:${id}:${round.id}`,platformId:terminal.platformId,round,publishedAt:new Date().toISOString()});
+      if(runtime.gameStrategyRuntime.processedRounds>before)processed++;
+    }};
+    while(cursor<rounds.length){const end=Math.min(rounds.length,cursor+chunkSize);processBatch(rounds.slice(cursor,end));cursor=end;options?.onProgress?.(rounds.length?Math.round(cursor/rounds.length*95):95);await new Promise<void>(resolve=>setImmediate(resolve));}
+    const known=new Set(rounds.map(round=>round.id));
+    const catchUp=(options?.catchUpRounds?.()??[]).filter(round=>!known.has(round.id));
+    for(let index=0;index<catchUp.length;index+=chunkSize){processBatch(catchUp.slice(index,index+chunkSize));await new Promise<void>(resolve=>setImmediate(resolve));}
+    if(!terminal.enabled)runtime.status='STOPPED';
+    else if(terminal.paused){runtime.status='PAUSED';runtime.pauseState={type:'MANUAL',reason:'Pausa manual',ruleId:null,sourceTerminalId:null};}
+    runtime.updatedAt=new Date().toISOString();this.repository.saveTerminalRuntime(runtime);
+    this.repository.updateTerminalGameStats(id,runtime.resultAnalyzerState.winCount,runtime.resultAnalyzerState.lossCount);
+    if(runtime.status==='RUNNING')this.attach(terminal);
+    options?.onProgress?.(100);return processed;
+  }
   setAssistedPreparationHandler(handler: (request: {terminalId:string;deliveryMode:NormalizedRound['deliveryMode'];stageIndex:number;betPlanId:string;amountsCents:number[]}) => void | Promise<void>) { this.assistedPreparationHandler = handler; }
   setScreenControllerState(id: string, status: TerminalRuntime['screenControllerState']['status']) {
     const runtime = this.runtimes.get(id); if (!runtime) return;
@@ -180,6 +207,7 @@ export class TerminalManager {
 
   private initializeTerminal(terminal: Terminal) {
     const runtime = this.repository.getTerminalRuntime(terminal.id) ?? createRuntime(terminal);
+    runtime.sequenceAiRuntime=normalizeSequenceAiRuntime(runtime.sequenceAiRuntime);
     normalizeAnalyzerStreaksFromPattern(runtime);
     // O runtime persistido e a fonte de verdade. Recalcular/cancelar uma etapa
     // ativa a partir do padrao W/L durante a inicializacao fazia a primeira
@@ -264,7 +292,8 @@ export class TerminalManager {
           const resolvedLegs = stage?.legs.map((leg,index)=>({...leg,resolvedAmountCents:runtime.galeRuntime.preparedLegAmountsCents?.[index]??calculateBetAmount(leg,{bankrollCents:runtime.bankrollState.currentBalanceCents,initialBankrollCents:runtime.bankrollState.initialBalanceCents,previousAmountCents:runtime.galeRuntime.previousAmountCents??0,currentLossStreak:runtime.resultAnalyzerState.currentLossStreak,lastLossStreak:runtime.resultAnalyzerState.lastClosedLossStreak,accumulatedLossCents:runtime.galeRuntime.accumulatedLossCents??0,stageIndex,cashout:leg.cashout})}))??[];
           const stakeCents = resolvedLegs.reduce((total, leg) => total + leg.resolvedAmountCents, 0);
           const bankrollBeforeCents = runtime.bankrollState.currentBalanceCents;
-          const limitReason=bankrollStopReason(runtime.bankrollState,stakeCents,betPlan?.bankrollLimits);
+          const financialActive=!terminal.bankrollStartAt||Date.parse(event.round.occurredAt)>=Date.parse(terminal.bankrollStartAt);
+          const limitReason=financialActive?bankrollStopReason(runtime.bankrollState,stakeCents,betPlan?.bankrollLimits):null;
           const canSettle = stakeCents > 0 && !limitReason;
           const returnedCents = canSettle ? resolvedLegs.reduce((total, leg) => total + (multiplier >= leg.cashout ? Math.round(leg.resolvedAmountCents * leg.cashout) : 0), 0) : 0;
           const profitLossCents = canSettle ? returnedCents - stakeCents : 0;
@@ -272,12 +301,15 @@ export class TerminalManager {
           const bankrollAfterCents = bankrollBeforeCents + profitLossCents;
           const stageLabel = stage?.label ?? (stageIndex === 0 ? 'BASE' : `GALE ${stageIndex}`);
           const createdAt = new Date().toISOString();
-          this.repository.saveBetStageEvent({ id: randomUUID(), cycleId: runtime.galeRuntime.cycleId, terminalId, gameSignalId: result.signal.id, stageIndex, stageLabel, result: stageResult, createdAt });
-          this.repository.saveBetExecution({ id: randomUUID(), cycleId: runtime.galeRuntime.cycleId, terminalId, gameSignalId: result.signal.id, stageIndex, stageLabel, multiplier, stakeCents, returnedCents, profitLossCents, bankrollBeforeCents, bankrollAfterCents, result: stageResult, createdAt });
-          if(terminal.strategySourceTerminalId){
-            this.repository.updateTerminalGameStats(terminal.id,terminal.gameWins+(stageResult==='LOSS'?0:1),terminal.gameLosses+(stageResult==='LOSS'?1:0));
+          if(financialActive){
+            this.repository.saveBetStageEvent({ id: randomUUID(), cycleId: runtime.galeRuntime.cycleId, terminalId, gameSignalId: result.signal.id, stageIndex, stageLabel, result: stageResult, createdAt });
+            this.repository.saveBetExecution({ id: randomUUID(), cycleId: runtime.galeRuntime.cycleId, terminalId, gameSignalId: result.signal.id, stageIndex, stageLabel, multiplier, stakeCents, returnedCents, profitLossCents, bankrollBeforeCents, bankrollAfterCents, result: stageResult, createdAt });
           }
-          runtime.bankrollState = updateBankrollMetrics(runtime.bankrollState,profitLossCents,stakeCents,betPlan?.bankrollLimits);
+          if(financialActive&&terminal.strategySourceTerminalId){
+            // Empate financeiro e neutro: nao aumenta nem WIN nem LOSS.
+            this.repository.updateTerminalGameStats(terminal.id,terminal.gameWins+(stageResult==='WIN'?1:0),terminal.gameLosses+(stageResult==='LOSS'?1:0));
+          }
+          if(financialActive)runtime.bankrollState = updateBankrollMetrics(runtime.bankrollState,profitLossCents,stakeCents,betPlan?.bankrollLimits);
           runtime.galeRuntime.previousAmountCents=stakeCents;
           runtime.galeRuntime.accumulatedLossCents=profitLossCents<0?(runtime.galeRuntime.accumulatedLossCents??0)-profitLossCents:0;
           const cycleWinCount=(runtime.galeRuntime.currentCycleWinCount??0)+(stageResult==='WIN'?1:0);
@@ -285,10 +317,10 @@ export class TerminalManager {
           runtime.galeRuntime.currentCycleWinCount=cycleWinCount;
           runtime.galeRuntime.currentCycleLossCount=cycleLossCount;
           const closedCycleCounts={currentCycleWinCount:0,currentCycleLossCount:0,lastCycleWinCount:cycleWinCount,lastCycleLossCount:cycleLossCount,get failedCycleAttempts(){return runtime.galeRuntime.failedCycleAttempts??0;}};
-          this.repository.updateTerminalBankroll(terminalId, bankrollAfterCents);
-          if(limitReason||runtime.bankrollState.stopReason){runtime.status='PAUSED';runtime.pauseState={type:'RULE',reason:limitReason??runtime.bankrollState.stopReason,ruleId:null,sourceTerminalId:terminalId};this.unsubscribeByTerminal.get(terminalId)?.();this.unsubscribeByTerminal.delete(terminalId);}
+          if(financialActive)this.repository.updateTerminalBankroll(terminalId, bankrollAfterCents);
+          if(financialActive&&(limitReason||runtime.bankrollState.stopReason)){runtime.status='PAUSED';runtime.pauseState={type:'RULE',reason:limitReason??runtime.bankrollState.stopReason,ruleId:null,sourceTerminalId:terminalId};this.unsubscribeByTerminal.get(terminalId)?.();this.unsubscribeByTerminal.delete(terminalId);}
           const dependentCombinationCycle = terminal.strategySourceTerminalId != null && runtime.galeRuntime.activeCombinationId != null;
-          if (runtime.galeRuntime.followUp && runtime.galeRuntime.followUpBehavior === 'REPEAT_UNTIL_LOSS' && !dependentCombinationCycle && result.signal.result === 'LOSS') {
+          if (runtime.galeRuntime.followUp && runtime.galeRuntime.followUpBehavior === 'REPEAT_UNTIL_LOSS' && !dependentCombinationCycle && result.signal.result === 'LOSS' && stageResult !== 'TIE') {
             completeCycleProgression(runtime,betPlan,stageResult==='WIN');
             // "AtÃ© LOSS" se refere ao sinal W/L da estratÃ©gia de jogo, nÃ£o ao
             // lucro lÃ­quido da aposta dupla. Um sinal L pode ainda dar pequeno
@@ -306,12 +338,13 @@ export class TerminalManager {
               runtime.gameStrategyRuntime.state='WAIT_RESULT';
               runtime.gameStrategyRuntime.triggerRoundId=result.signal.resultRoundId;
               const amountsCents=resolveStageAmounts(runtime,this.repository.getBetPlanConfig(nextPlanId),0);runtime.galeRuntime.preparedLegAmountsCents=amountsCents;
-              if(terminal.strategySourceMode!=='BET_EXECUTIONS')void this.assistedPreparationHandler?.({ terminalId, deliveryMode: event.round.deliveryMode, stageIndex: 0, betPlanId: nextPlanId,amountsCents });
+              if(terminal.strategySourceMode!=='BET_EXECUTIONS'&&!awaitsReferencedSignalPreparation(terminal))void this.assistedPreparationHandler?.({ terminalId, deliveryMode: event.round.deliveryMode, stageIndex: 0, betPlanId: nextPlanId,amountsCents });
             } else {
               runtime.galeRuntime = { active: false, currentStage: 0, cycleId: null, activeBetPlanId: null, onWinBetPlanId: null, followUp: false, followUpBehavior: 'RUN_ONCE', triggerLossStreakTarget:cycleLossStreakTarget,...closedCycleCounts };
             }
           } else if(stageResult==='TIE'&&betPlan?.continueOnTie===false){
-            completeCycleProgression(runtime,betPlan,false);
+            // Empate nao e WIN, mas reinicia o Gale e a progressao entre ciclos.
+            completeCycleProgression(runtime,betPlan,true);
             runtime.galeRuntime = { active: false, currentStage: 0, cycleId: null, activeBetPlanId: null, onWinBetPlanId: null, followUp: false, followUpBehavior: 'RUN_ONCE', triggerLossStreakTarget:cycleLossStreakTarget,...closedCycleCounts };
           } else if (stageResult==='LOSS'&&runtime.galeRuntime.followUp && runtime.galeRuntime.followUpBehavior === 'REPEAT_UNTIL_LOSS') {
             completeCycleProgression(runtime,betPlan,false);
@@ -327,11 +360,12 @@ export class TerminalManager {
             runtime.galeRuntime.entryConfirmed=false;
             const nextStage=betPlan?.stages[runtime.galeRuntime.currentStage];
             if(nextStage?.execution?.policy==='AFTER_ENTRY_CONFIRMATION')runtime.galeRuntime.preparedLegAmountsCents=[];
-            else{const amountsCents=resolveStageAmounts(runtime,betPlan,runtime.galeRuntime.currentStage,stageResult==='LOSS'?1:0);runtime.galeRuntime.preparedLegAmountsCents=amountsCents;runtime.galeRuntime.operationalPreparationKey=null;if(terminal.strategySourceMode==='BET_EXECUTIONS')this.prepareOperationalStage(terminal,runtime,event.round);else void this.assistedPreparationHandler?.({ terminalId, deliveryMode: event.round.deliveryMode, stageIndex: runtime.galeRuntime.currentStage, betPlanId: activeBetPlanId,amountsCents });}
+            else{const amountsCents=resolveStageAmounts(runtime,betPlan,runtime.galeRuntime.currentStage,stageResult==='LOSS'?1:0);runtime.galeRuntime.preparedLegAmountsCents=amountsCents;runtime.galeRuntime.operationalPreparationKey=null;if(terminal.strategySourceMode==='BET_EXECUTIONS')this.prepareOperationalStage(terminal,runtime,event.round);else if(!awaitsReferencedSignalPreparation(terminal))void this.assistedPreparationHandler?.({ terminalId, deliveryMode: event.round.deliveryMode, stageIndex: runtime.galeRuntime.currentStage, betPlanId: activeBetPlanId,amountsCents });}
           }
           }
         }
         runtime.resultAnalyzerState = this.resultAnalyzer.process(runtime.resultAnalyzerState, result.signal.result);
+        runtime.sequenceAiRuntime=observeSequenceResult(runtime.sequenceAiRuntime,result.signal.result);
         if(!terminal.strategySourceTerminalId)this.repository.updateTerminalGameStats(terminal.id, runtime.resultAnalyzerState.winCount, runtime.resultAnalyzerState.lossCount);
         if(!runtime.galeRuntime.active){
           if(result.signal.result==='WIN'){
@@ -354,6 +388,7 @@ export class TerminalManager {
           const pattern=reentry?combination.lossReentryPattern:combination.pattern;
           const candidateDecision=triggerType==='BET_STRATEGY'
             ?this.betStrategyEngine.decide({terminalId,betStrategyId:strategyId,config:candidateConfig,signal:gameSignal,analyzer:runtime.resultAnalyzerState,bankrollCents:runtime.bankrollState.currentBalanceCents})
+            :triggerType==='SEQUENCE_AI'?sequenceAiCombinationDecision(terminalId,strategyId,gameSignal,runtime,combination,this.repository.getBetPlanConfig(combination.betPlanId)?.stages.length??1)
             :patternCombinationDecision(terminalId,strategyId,gameSignal,runtime,combination,pattern,triggerType==='IMMEDIATE',reentry);
           return{strategyId,candidateConfig,candidateDecision};
         };
@@ -401,24 +436,24 @@ export class TerminalManager {
             if(activeStage?.execution?.policy==='AFTER_ENTRY_CONFIRMATION'&&!runtime.galeRuntime.entryConfirmed){
               runtime.galeRuntime.entryConfirmed=true;runtime.galeRuntime.waitingSignals=0;
               const amountsCents=resolveStageAmounts(runtime,activeBetPlan,runtime.galeRuntime.currentStage);runtime.galeRuntime.preparedLegAmountsCents=amountsCents;
-              void this.assistedPreparationHandler?.({terminalId,deliveryMode:event.round.deliveryMode,stageIndex:runtime.galeRuntime.currentStage,betPlanId:activeBetPlanId,amountsCents});
+              if(!awaitsReferencedSignalPreparation(terminal))void this.assistedPreparationHandler?.({terminalId,deliveryMode:event.round.deliveryMode,stageIndex:runtime.galeRuntime.currentStage,betPlanId:activeBetPlanId,amountsCents});
             }
           }
           if (decision.action === 'ENTER' && runtime.status==='RUNNING' && !runtime.galeRuntime.active) {
             const resultPlanId=selectedCombination?.betPlanId??(result.signal.result==='WIN'?terminal.betPlanWinId:terminal.betPlanLossId);
             const activeBetPlanId = resultPlanId;
             const winContinuationRule=this.repository.getBetStrategyConfig(terminal.betStrategyWinId)?.rules.find(rule=>rule.enabled&&rule.action==='ENTER'&&rule.onWinPlanBehavior==='REPEAT_UNTIL_LOSS');
-            const configuredOnWinPlanId=typeof decision.metadata.onWinBetPlanId==='string'?decision.metadata.onWinBetPlanId:winContinuationRule?.onWinBetPlanId??(winContinuationRule?terminal.betPlanWinId:null);
-            const combinationRepeats=selectedCombination?.behavior==='REPEAT_UNTIL_LOSS';
+            const combinationRepeats=selectedCombination?.triggerType!=='SEQUENCE_AI'&&selectedCombination?.behavior==='REPEAT_UNTIL_LOSS';
+            const configuredOnWinPlanId=selectedCombination?null:typeof decision.metadata.onWinBetPlanId==='string'?decision.metadata.onWinBetPlanId:winContinuationRule?.onWinBetPlanId??(winContinuationRule?terminal.betPlanWinId:null);
             const onWinBetPlanId = combinationRepeats?activeBetPlanId:configuredOnWinPlanId&&this.repository.getBetPlanConfig(configuredOnWinPlanId) ? configuredOnWinPlanId : null;
-            const followUpBehavior = combinationRepeats||decision.metadata.onWinPlanBehavior === 'REPEAT_UNTIL_LOSS'||winContinuationRule?.onWinPlanBehavior==='REPEAT_UNTIL_LOSS' ? 'REPEAT_UNTIL_LOSS' : 'RUN_ONCE';
+            const followUpBehavior = combinationRepeats||(!selectedCombination&&(decision.metadata.onWinPlanBehavior === 'REPEAT_UNTIL_LOSS'||winContinuationRule?.onWinPlanBehavior==='REPEAT_UNTIL_LOSS')) ? 'REPEAT_UNTIL_LOSS' : 'RUN_ONCE';
             const matchedRule=betConfig.rules.find(rule=>rule.id===decision.ruleId);
             const triggerLossStreakTarget=matchedRule?.conditions.some(condition=>condition.field==='currentLossStreak'&&condition.referenceField==='lastClosedLossStreak')?(runtime.resultAnalyzerState.lastClosedLossStreak||null):runtime.galeRuntime.triggerLossStreakTarget??null;
             runtime.galeRuntime = { active: true, currentStage: 0, cycleId: randomUUID(), activeBetPlanId,activeCombinationId:selectedCombination?.id??null, onWinBetPlanId, followUp: combinationRepeats, followUpBehavior, triggerLossStreakTarget,triggerLossProgress:runtime.galeRuntime.triggerLossProgress??0,entryConfirmed:true,failedCycleAttempts:runtime.galeRuntime.failedCycleAttempts??0,currentCycleWinCount:0,currentCycleLossCount:0,lastCycleWinCount:runtime.galeRuntime.lastCycleWinCount??0,lastCycleLossCount:runtime.galeRuntime.lastCycleLossCount??0 };
             if(decision.metadata.prospectiveWinEntry===true){runtime.gameStrategyRuntime.state='WAIT_RESULT';runtime.gameStrategyRuntime.triggerRoundId=result.signal.resultRoundId;}
             const amountsCents=resolveStageAmounts(runtime,this.repository.getBetPlanConfig(activeBetPlanId),0);runtime.galeRuntime.preparedLegAmountsCents=amountsCents;
             runtime.galeRuntime.operationalPreparationKey=null;
-            void this.assistedPreparationHandler?.({ terminalId, deliveryMode: event.round.deliveryMode, stageIndex: 0, betPlanId: activeBetPlanId,amountsCents });
+            if(!awaitsReferencedSignalPreparation(terminal))void this.assistedPreparationHandler?.({ terminalId, deliveryMode: event.round.deliveryMode, stageIndex: 0, betPlanId: activeBetPlanId,amountsCents });
           }
         }
       }
@@ -431,6 +466,7 @@ export class TerminalManager {
       if(runtime.galeRuntime.active)this.prepareOperationalStage(terminal,runtime,event.round);
       else this.armOperationalBase(terminal,runtime,event.round);
     }
+    if(event.round.deliveryMode==='LIVE'&&terminal?.strategySourceMode==='GAME_SIGNALS'&&terminal.strategySourceTerminalId&&runtime.galeRuntime.active&&!sourceSignal&&this.sourceSignalIsImminent(terminal.strategySourceTerminalId))this.prepareOperationalStage(terminal,runtime,event.round);
     runtime.lastProcessedRoundId = event.round.id;
     runtime.updatedAt = new Date().toISOString();
     this.repository.saveTerminalRuntime(runtime);
@@ -469,6 +505,8 @@ export class TerminalManager {
     return signalSourceRuntime?.gameStrategyRuntime.lastAnnotationRole==='TRIGGER'||signalSourceRuntime?.gameStrategyRuntime.lastAnnotationRole==='RELEASE_TRIGGER';
   }
 
+  private sourceSignalIsImminent(sourceTerminalId:string):boolean{const source=this.repository.getTerminal(sourceTerminalId);const runtime=this.runtimes.get(sourceTerminalId);if(!source||!runtime)return false;if(!source.strategySourceTerminalId)return runtime.gameStrategyRuntime.lastAnnotationRole==='TRIGGER'||runtime.gameStrategyRuntime.lastAnnotationRole==='RELEASE_TRIGGER';return this.sourceSignalIsImminent(source.strategySourceTerminalId);}
+
   private evaluateControlRules(sourceTerminalId:string){
     const runtime=this.runtimes.get(sourceTerminalId);if(!runtime||runtime.pauseState.type==='MANUAL')return;
     const rules=this.repository.getTerminalControlRules(sourceTerminalId).filter(rule=>rule.enabled);const matchesRule=(rule:TerminalControlRule)=>compareControlValue(controlMetricValue(rule,runtime),rule.operator,rule.referenceMetric?controlMetricValueByName(rule.referenceMetric,runtime):rule.value);
@@ -481,11 +519,16 @@ export class TerminalManager {
   private applyRuleWait(targetId:string,rules:TerminalControlRule[]){const runtime=this.runtimes.get(targetId);const terminal=this.repository.getTerminal(targetId);if(!runtime||!terminal)return;runtime.status='PAUSED';runtime.pauseState={type:'RULE',reason:`Aguardando uma regra PLAY: ${rules.map(rule=>rule.name).join(', ')}`,ruleId:rules[0]?.id??null,sourceTerminalId:targetId};runtime.updatedAt=new Date().toISOString();if(!this.unsubscribeByTerminal.has(targetId))this.attach(terminal);this.repository.saveTerminalRuntime(runtime);}
   private applyRuleResume(targetId:string){const terminal=this.repository.getTerminal(targetId);const runtime=this.runtimes.get(targetId);if(!terminal||!runtime||terminal.paused||runtime.pauseState.type!=='RULE')return;runtime.pauseState={type:'NONE',reason:null,ruleId:null,sourceTerminalId:null};this.startRuntime(targetId);}
   private isControlRulePause(runtime:TerminalRuntime){return runtime.pauseState.type==='RULE'&&this.repository.getTerminalControlRules(runtime.terminalId).some(rule=>rule.enabled);}
-  private processPausedControlObservation(terminalId:string,event:RoundEvent){const runtime=this.runtimes.get(terminalId);const terminal=this.repository.getTerminal(terminalId);if(!runtime||!terminal||!this.repository.recordRoundReceipt(terminalId,event.round))return;const sourceSignal=terminal.strategySourceTerminalId?this.repository.getTerminalGameSignalByRound(terminal.strategySourceTerminalId,event.round.id):null;const config=!terminal.strategySourceTerminalId?this.repository.getGameStrategyConfig(terminal.gameStrategyId):null;const result=sourceSignal?referencedGameResult(terminal,runtime,event.round,sourceSignal):config?this.gameStrategyEngine.process({terminalId,strategyId:terminal.gameStrategyId,config,runtime:runtime.gameStrategyRuntime,round:event.round}):null;if(result){runtime.gameStrategyRuntime=result.runtime;this.repository.saveRoundAnnotation(result.annotation);if(result.signal){this.repository.saveGameSignal(result.signal);runtime.resultAnalyzerState=this.resultAnalyzer.process(runtime.resultAnalyzerState,result.signal.result);if(!terminal.strategySourceTerminalId)this.repository.updateTerminalGameStats(terminal.id,runtime.resultAnalyzerState.winCount,runtime.resultAnalyzerState.lossCount);this.evaluateControlRules(terminalId);}}else{runtime.gameStrategyRuntime.processedRounds++;runtime.gameStrategyRuntime.lastMultiplier=event.round.multiplier;}runtime.lastProcessedRoundId=event.round.id;runtime.updatedAt=new Date().toISOString();this.repository.saveTerminalRuntime(runtime);}
+  private processPausedControlObservation(terminalId:string,event:RoundEvent){const runtime=this.runtimes.get(terminalId);const terminal=this.repository.getTerminal(terminalId);if(!runtime||!terminal||!this.repository.recordRoundReceipt(terminalId,event.round))return;const sourceSignal=terminal.strategySourceTerminalId?this.repository.getTerminalGameSignalByRound(terminal.strategySourceTerminalId,event.round.id):null;const config=!terminal.strategySourceTerminalId?this.repository.getGameStrategyConfig(terminal.gameStrategyId):null;const result=sourceSignal?referencedGameResult(terminal,runtime,event.round,sourceSignal):config?this.gameStrategyEngine.process({terminalId,strategyId:terminal.gameStrategyId,config,runtime:runtime.gameStrategyRuntime,round:event.round}):null;if(result){runtime.gameStrategyRuntime=result.runtime;this.repository.saveRoundAnnotation(result.annotation);if(result.signal){this.repository.saveGameSignal(result.signal);runtime.resultAnalyzerState=this.resultAnalyzer.process(runtime.resultAnalyzerState,result.signal.result);runtime.sequenceAiRuntime=observeSequenceResult(runtime.sequenceAiRuntime,result.signal.result);if(!terminal.strategySourceTerminalId)this.repository.updateTerminalGameStats(terminal.id,runtime.resultAnalyzerState.winCount,runtime.resultAnalyzerState.lossCount);this.evaluateControlRules(terminalId);}}else{runtime.gameStrategyRuntime.processedRounds++;runtime.gameStrategyRuntime.lastMultiplier=event.round.multiplier;}runtime.lastProcessedRoundId=event.round.id;runtime.updatedAt=new Date().toISOString();this.repository.saveTerminalRuntime(runtime);}
 }
 
 export function createRuntime(terminal: Terminal): TerminalRuntime {
-  return { terminalId: terminal.id, gameStrategyRuntime: { state: 'SEARCH_TRIGGER', processedRounds: 0, lastMultiplier: null, triggerRoundId: null, releaseProgress:0, lastAnnotationRole:null }, resultAnalyzerState: createResultAnalyzerState(), betStrategyRuntime: { lastDecisionId: null, lastAction: null, decisionCount: 0, entryCount: 0, ignoredCount: 0 }, galeRuntime: { active: false, currentStage: 0, cycleId: null, activeBetPlanId: null,activeCombinationId:null, onWinBetPlanId: null, followUp: false, followUpBehavior: 'RUN_ONCE', triggerLossStreakTarget:null,triggerLossProgress:0, previousAmountCents:0, accumulatedLossCents:0, waitingSignals:0,entryConfirmed:false,failedCycleAttempts:0, preparedLegAmountsCents:[],currentCycleWinCount:0,currentCycleLossCount:0,lastCycleLossCount:0,lastCycleWinCount:0 }, bankrollState: createBankrollMetrics(terminal.initialBankrollCents), screenControllerState: { status: 'IDLE', paused: false }, scheduleState:{allowed:true,reason:null,checkedAt:null},pauseState:{type:terminal.paused?'MANUAL':'NONE',reason:terminal.paused?'Pausa manual':null,ruleId:null,sourceTerminalId:null}, lastProcessedRoundId: null, status: terminal.paused ? 'PAUSED' : 'RUNNING', updatedAt: new Date().toISOString() };
+  return { terminalId: terminal.id, gameStrategyRuntime: { state: 'SEARCH_TRIGGER', processedRounds: 0, lastMultiplier: null, triggerRoundId: null, releaseProgress:0, lastAnnotationRole:null }, resultAnalyzerState: createResultAnalyzerState(),sequenceAiRuntime:createSequenceAiRuntime(), betStrategyRuntime: { lastDecisionId: null, lastAction: null, decisionCount: 0, entryCount: 0, ignoredCount: 0 }, galeRuntime: { active: false, currentStage: 0, cycleId: null, activeBetPlanId: null,activeCombinationId:null, onWinBetPlanId: null, followUp: false, followUpBehavior: 'RUN_ONCE', triggerLossStreakTarget:null,triggerLossProgress:0, previousAmountCents:0, accumulatedLossCents:0, waitingSignals:0,entryConfirmed:false,failedCycleAttempts:0, preparedLegAmountsCents:[],currentCycleWinCount:0,currentCycleLossCount:0,lastCycleLossCount:0,lastCycleWinCount:0 }, bankrollState: createBankrollMetrics(terminal.initialBankrollCents), screenControllerState: { status: 'IDLE', paused: false }, scheduleState:{allowed:true,reason:null,checkedAt:null},pauseState:{type:terminal.paused?'MANUAL':'NONE',reason:terminal.paused?'Pausa manual':null,ruleId:null,sourceTerminalId:null}, lastProcessedRoundId: null, status: terminal.paused ? 'PAUSED' : 'RUNNING', updatedAt: new Date().toISOString() };
+}
+
+function sequenceAiCombinationDecision(terminalId:string,strategyId:string,signal:GameSignal,runtime:TerminalRuntime,combination:Terminal['operationCombinations'][number],riskDepth:number):BetDecision{
+  const config=combination.sequenceAiConfig??{minWindow:2,maxWindow:12,minOccurrences:20,minConfidence:60,maxCurrentLossStreak:3,minContextAgreement:60,maxFullCycleLossRisk:0};const prediction=predictSequence(runtime.sequenceAiRuntime,config,riskDepth);runtime.sequenceAiRuntime.lastPrediction=prediction;
+  return{id:randomUUID(),terminalId,platformId:signal.platformId,betStrategyId:strategyId,gameSignalId:signal.id,ruleId:`combination:${combination.id}:sequence-ai`,action:prediction.shouldEnter?'ENTER':'IGNORE',createdAt:new Date().toISOString(),metadata:{operationCombinationId:combination.id,operationCombinationName:combination.name,triggerType:'SEQUENCE_AI',sequenceAiConfig:config,sequenceAiPrediction:prediction,analyzer:runtime.resultAnalyzerState,bankrollCents:runtime.bankrollState.currentBalanceCents}};
 }
 
 function patternCombinationDecision(terminalId:string,strategyId:string,signal:GameSignal,runtime:TerminalRuntime,combination:Terminal['operationCombinations'][number],pattern:string|null,immediate:boolean,reentry:boolean):BetDecision{
@@ -499,6 +542,7 @@ function referencedOperationalResult(terminal:Terminal,runtime:TerminalRuntime,r
 function operationalPhysicalResult(terminal:Terminal,runtime:TerminalRuntime,round:NormalizedRound){const result:GameSignal['result']=round.multiplier>=2?'WIN':'LOSS';const state=runtime.gameStrategyRuntime.state;const gameRuntime={...runtime.gameStrategyRuntime,processedRounds:runtime.gameStrategyRuntime.processedRounds+1,lastMultiplier:round.multiplier,lastAnnotationRole:result};const metadata={multiplier:round.multiplier,deliveryMode:round.deliveryMode,operationalContinuation:true,physicalRound:true};return{runtime:gameRuntime,annotation:{id:randomUUID(),terminalId:terminal.id,roundId:round.id,strategyId:terminal.gameStrategyId,role:result,stateBefore:state,stateAfter:state,metadata,createdAt:round.occurredAt} as RoundAnnotation,signal:{id:randomUUID(),terminalId:terminal.id,platformId:terminal.platformId,strategyId:terminal.gameStrategyId,triggerRoundId:round.id,resultRoundId:round.id,result,metadata,createdAt:round.occurredAt} as GameSignal};}
 function ignoredOperationalContinuationDecision(terminalId:string,strategyId:string,signal:GameSignal,runtime:TerminalRuntime):BetDecision{return{id:randomUUID(),terminalId,platformId:signal.platformId,betStrategyId:strategyId,gameSignalId:signal.id,ruleId:null,action:'IGNORE',createdAt:new Date().toISOString(),metadata:{operationalContinuation:true,reason:'A rodada pertence ao ciclo armado; somente uma nova operação da fonte pode armar outro ciclo.',analyzer:runtime.resultAnalyzerState,bankrollCents:runtime.bankrollState.currentBalanceCents}};}
 function entryIsBlocked(terminal:Terminal,runtime:TerminalRuntime){const recent=runtime.resultAnalyzerState.recentPattern.toUpperCase();return terminal.entryBlockPatterns.some(pattern=>recent.endsWith(pattern.toUpperCase()));}
+function awaitsReferencedSignalPreparation(terminal:Terminal){return terminal.strategySourceTerminalId!==null&&terminal.strategySourceMode==='GAME_SIGNALS';}
 function normalizeAnalyzerStreaksFromPattern(runtime:TerminalRuntime){const pattern=runtime.resultAnalyzerState.recentPattern;const currentLoss=pattern.match(/L+$/)?.[0].length??0;const currentWin=pattern.match(/W+$/)?.[0].length??0;const closedLossBlocks=[...pattern.matchAll(/L+(?=W)/g)];const lastClosedLoss=closedLossBlocks.at(-1)?.[0].length;runtime.resultAnalyzerState.currentLossStreak=currentLoss;runtime.resultAnalyzerState.currentWinStreak=currentWin;if(lastClosedLoss!==undefined)runtime.resultAnalyzerState.lastClosedLossStreak=lastClosedLoss;}
 function isStageReady(execution:BetPlanConfig['stages'][number]['execution'],runtime:TerminalRuntime,result:'WIN'|'LOSS'){if(!execution||execution.policy==='NEXT_VALID_SIGNAL')return true;if(execution.policy==='AFTER_ENTRY_CONFIRMATION')return runtime.galeRuntime.entryConfirmed===true;if(execution.policy==='AFTER_N_SIGNALS')return(runtime.galeRuntime.waitingSignals??0)+1>=Math.max(1,execution.signalCount??1);if(execution.policy==='AFTER_PATTERN'){const pattern=(execution.pattern??'').toUpperCase();return pattern.length>0&&`${runtime.resultAnalyzerState.recentPattern}${result[0]}`.endsWith(pattern);}if(!execution.condition)return false;const condition=execution.condition;const left=condition.field==='bankroll'?runtime.bankrollState.currentBalanceCents:Number(runtime.resultAnalyzerState[condition.field]);const right=condition.referenceField?(condition.referenceField==='bankroll'?runtime.bankrollState.currentBalanceCents:Number(runtime.resultAnalyzerState[condition.referenceField])):condition.value;if(typeof left!=='number'||typeof right!=='number')return false;return condition.operator==='GT'?left>right:condition.operator==='GTE'?left>=right:condition.operator==='LT'?left<right:condition.operator==='LTE'?left<=right:left===right;}
 function resolveStageAmounts(runtime:TerminalRuntime,plan:BetPlanConfig|null,index:number,lossOffset=0){const progression=plan?.cycleProgression;const failed=runtime.galeRuntime.failedCycleAttempts??0;const factor=progression?1+Math.floor(failed/progression.attemptsPerStep)*progression.increasePercentage/100:1;return plan?.stages[index]?.legs.map(leg=>Math.max(1,Math.round(calculateBetAmount(leg,{bankrollCents:runtime.bankrollState.currentBalanceCents,initialBankrollCents:runtime.bankrollState.initialBalanceCents,previousAmountCents:runtime.galeRuntime.previousAmountCents??0,currentLossStreak:runtime.resultAnalyzerState.currentLossStreak+lossOffset,lastLossStreak:runtime.resultAnalyzerState.lastClosedLossStreak,accumulatedLossCents:runtime.galeRuntime.accumulatedLossCents??0,stageIndex:index,cashout:leg.cashout})*factor)))??[];}

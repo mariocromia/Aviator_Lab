@@ -18,6 +18,7 @@ declare global {
       deleteTerminal(id: string): Promise<ApiResult<boolean>>;
       resetTerminal(id:string,mode:'FINANCIAL'|'FULL'):Promise<ApiResult<boolean>>;
       updateTerminalInitialBankroll(id:string,initialBankrollCents:number):Promise<ApiResult<boolean>>;
+      setTerminalBankrollAnchor(id:string,initialBankrollCents:number,bankrollStartAt:string):Promise<ApiResult<boolean>>;
       getTerminalHistory(terminalId:string,limit?:number):Promise<ApiResult<import('@aviator/shared').TerminalHistoryItem[]>>;
       setTerminalPaused(id: string, paused: boolean): Promise<ApiResult<boolean>>;
       setTerminalSchedulePlan(terminalId:string,schedulePlanId:string|null):Promise<ApiResult<boolean>>;

@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('aviator', {
   deleteTerminal: (id: string) => ipcRenderer.invoke('terminal:delete', id),
   resetTerminal:(id:string,mode:'FINANCIAL'|'FULL')=>ipcRenderer.invoke('terminal:reset',{id,mode}),
   updateTerminalInitialBankroll:(id:string,initialBankrollCents:number)=>ipcRenderer.invoke('terminal:update-bankroll',{id,initialBankrollCents}),
+  setTerminalBankrollAnchor:(id:string,initialBankrollCents:number,bankrollStartAt:string)=>ipcRenderer.invoke('terminal:set-bankroll-anchor',{id,initialBankrollCents,bankrollStartAt}),
   getTerminalHistory:(terminalId:string,limit=5000)=>ipcRenderer.invoke('terminal:history',{terminalId,limit}),
   setTerminalPaused: (id: string, paused: boolean) => ipcRenderer.invoke('terminal:set-paused', { id, paused }),
   setTerminalSchedulePlan: (terminalId:string,schedulePlanId:string|null)=>ipcRenderer.invoke('terminal:set-schedule-plan',{terminalId,schedulePlanId}),

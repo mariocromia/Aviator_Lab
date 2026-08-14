@@ -17,6 +17,7 @@ interface AppState extends Omit<BootstrapData, 'session'> {
   deleteTerminal(id: string): Promise<void>;
   resetTerminal(id:string,mode:'FINANCIAL'|'FULL'):Promise<boolean>;
   updateTerminalInitialBankroll(id:string,initialBankrollCents:number):Promise<boolean>;
+  setTerminalBankrollAnchor(id:string,initialBankrollCents:number,bankrollStartAt:string):Promise<boolean>;
   setTerminalPaused(id: string, paused: boolean): Promise<void>;
   setTerminalSchedulePlan(terminalId:string,schedulePlanId:string|null):Promise<boolean>;
   saveTerminalControlRule(input:unknown):Promise<boolean>;
@@ -29,7 +30,7 @@ interface AppState extends Omit<BootstrapData, 'session'> {
   clearError(): void;
 }
 
-const empty: Omit<BootstrapData, 'session'> = { platforms: [], terminals: [], gameStrategies: [], betStrategies: [], betPlans: [], schedulePlans:[], recentRounds: [], collectors: [], terminalRuntimes: [], terminalHistories: {},terminalHistoryDisplayMax:200, screenProfiles: [], terminalSchedules:[],terminalControlRules:[], eventBus: { publishedEvents: 0, deliveredEvents: 0, failedDeliveries: 0, subscribersByPlatform: {} } };
+const empty: Omit<BootstrapData, 'session'> = { platforms: [], terminals: [], gameStrategies: [], betStrategies: [], betPlans: [], schedulePlans:[], recentRounds: [], collectors: [], terminalRuntimes: [], terminalHistories: {},terminalUpdateStates:{},terminalHistoryDisplayMax:200, screenProfiles: [], terminalSchedules:[],terminalControlRules:[], eventBus: { publishedEvents: 0, deliveredEvents: 0, failedDeliveries: 0, subscribersByPlatform: {} } };
 let activeRefresh:Promise<void>|null=null;
 let refreshQueued=false;
 
@@ -91,6 +92,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteTerminal: async (id) => { const result = await window.aviator.deleteTerminal(id); if (!result.ok) set({ error: result.error ?? 'Não foi possível excluir.' }); await get().refresh(); },
   resetTerminal:async(id,mode)=>{const result=await window.aviator.resetTerminal(id,mode);if(!result.ok){set({error:result.error??'Não foi possível resetar o Terminal.'});return false}await get().refresh();return true},
   updateTerminalInitialBankroll:async(id,initialBankrollCents)=>{const result=await window.aviator.updateTerminalInitialBankroll(id,initialBankrollCents);if(!result.ok){set({error:result.error??'Não foi possível atualizar a banca inicial.'});return false}await get().refresh();return true},
+  setTerminalBankrollAnchor:async(id,initialBankrollCents,bankrollStartAt)=>{const result=await window.aviator.setTerminalBankrollAnchor(id,initialBankrollCents,bankrollStartAt);if(!result.ok){set({error:result.error??'Não foi possível definir a bolinha inicial da banca.'});return false}await get().refresh();return true},
   setTerminalPaused: async (id, paused) => { await window.aviator.setTerminalPaused(id, paused); await get().refresh(); },
   setTerminalSchedulePlan:async(terminalId,schedulePlanId)=>{const result=await window.aviator.setTerminalSchedulePlan(terminalId,schedulePlanId);if(!result.ok){set({error:result.error??'Não foi possível vincular o plano de horários.'});return false}await get().refresh();return true},
   saveTerminalControlRule:async input=>{const result=await window.aviator.saveTerminalControlRule(input);if(!result.ok){set({error:result.error??'Não foi possível salvar a regra de controle.'});return false}await get().refresh();return true},

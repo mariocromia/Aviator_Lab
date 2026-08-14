@@ -14,7 +14,7 @@ describe('Terminal presets',()=>{
     const database=new AppDatabase(path.join(directory,'app.db'));
     expect(database.bootstrap().terminalHistoryDisplayMax).toBe(200);
     const terminal=database.listTerminals()[0];
-    terminal.historyDisplayLimit=100;terminal.operationCombinations=[{id:'llw',name:'LLW até LOSS',priority:10,enabled:true,triggerType:'PATTERN',pattern:'LLW',betStrategyId:terminal.betStrategyWinId,lossReentryType:'PATTERN',lossReentryPattern:'W',lossReentryBetStrategyId:null,betPlanId:terminal.betPlanWinId,behavior:'REPEAT_UNTIL_LOSS'}];database.updateTerminal(terminal);
+    terminal.historyDisplayLimit=100;terminal.analysisRoundLimit=5_000;terminal.operationCombinations=[{id:'sequence-ai',name:'IA até LOSS',priority:10,enabled:true,triggerType:'SEQUENCE_AI',pattern:null,sequenceAiConfig:{minWindow:2,maxWindow:12,minOccurrences:20,minConfidence:62},betStrategyId:terminal.betStrategyWinId,lossReentryType:'IMMEDIATE',lossReentryPattern:null,lossReentryBetStrategyId:null,betPlanId:terminal.betPlanWinId,behavior:'REPEAT_UNTIL_LOSS'}];database.updateTerminal(terminal);
     const originalGame=database.listConfigurationDocuments('GAME_STRATEGY').find(item=>item.id===terminal.gameStrategyId)!;
     const preset=database.saveTerminalPreset(terminal.id,'Snapshot protegido');
     database.saveConfiguration({id:originalGame.id,kind:'GAME_STRATEGY',name:'Alterada',sortOrder:originalGame.sortOrder,config:{trigger:[{operator:'GT',value:50}],win:[{operator:'GTE',value:90}],loss:[{operator:'LT',value:90}],afterLoss:[],release:[{operator:'GTE',value:90}]}});
@@ -27,8 +27,9 @@ describe('Terminal presets',()=>{
     expect(restored.draft.strategySourceTerminalId).toBeNull();
     expect(restored.draft.paused).toBe(true);
     expect(restored.draft.historyDisplayLimit).toBe(100);
+    expect(restored.draft.analysisRoundLimit).toBe(5_000);
     expect(restored.draft.operationCombinations).toHaveLength(1);
-    expect(restored.draft.operationCombinations?.[0]).toMatchObject({id:'llw',name:'LLW até LOSS',behavior:'REPEAT_UNTIL_LOSS'});
+    expect(restored.draft.operationCombinations?.[0]).toMatchObject({id:'sequence-ai',name:'IA até LOSS',triggerType:'SEQUENCE_AI',sequenceAiConfig:{maxWindow:12,minConfidence:62},behavior:'REPEAT_UNTIL_LOSS'});
     expect(restored.draft.operationCombinations?.[0].betStrategyId).not.toBe(terminal.betStrategyWinId);
     expect(restored.draft.operationCombinations?.[0].betPlanId).not.toBe(terminal.betPlanWinId);
     database.close();

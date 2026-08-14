@@ -1,6 +1,6 @@
 import type { Terminal } from '@aviator/shared';
 
-export type TerminalDraft = Omit<Terminal, 'id' | 'createdAt' | 'updatedAt' | 'currentBankrollCents' | 'gameWins' | 'gameLosses' | 'sortOrder' | 'betStrategyWinId' | 'betStrategyLossId' | 'betPlanWinId' | 'betPlanLossId'|'controlPlayRuleIds'|'controlPauseRuleIds'|'strategySourceTerminalId'|'strategySourceMode'|'historyDisplayLimit'|'entryBlockPatterns'|'operationCombinations'> & { sortOrder?: number; betStrategyWinId?:string; betStrategyLossId?:string;betPlanWinId?:string;betPlanLossId?:string;controlPlayRuleIds?:string[];controlPauseRuleIds?:string[];strategySourceTerminalId?:string|null;strategySourceMode?:Terminal['strategySourceMode'];historyDisplayLimit?:number;entryBlockPatterns?:string[];operationCombinations?:Terminal['operationCombinations'] };
+export type TerminalDraft = Omit<Terminal, 'id' | 'createdAt' | 'updatedAt' | 'currentBankrollCents' | 'gameWins' | 'gameLosses' | 'sortOrder' | 'betStrategyWinId' | 'betStrategyLossId' | 'betPlanWinId' | 'betPlanLossId'|'controlPlayRuleIds'|'controlPauseRuleIds'|'strategySourceTerminalId'|'strategySourceMode'|'historyDisplayLimit'|'analysisRoundLimit'|'bankrollStartAt'|'entryBlockPatterns'|'operationCombinations'> & { sortOrder?: number; betStrategyWinId?:string; betStrategyLossId?:string;betPlanWinId?:string;betPlanLossId?:string;controlPlayRuleIds?:string[];controlPauseRuleIds?:string[];strategySourceTerminalId?:string|null;strategySourceMode?:Terminal['strategySourceMode'];historyDisplayLimit?:number;analysisRoundLimit?:number;bankrollStartAt?:string|null;entryBlockPatterns?:string[];operationCombinations?:Terminal['operationCombinations'] };
 
 export function createTerminal(draft: TerminalDraft, id: string, now: string): Terminal {
   return {
@@ -15,6 +15,8 @@ export function createTerminal(draft: TerminalDraft, id: string, now: string): T
     betPlanLossId: draft.betPlanLossId ?? draft.betPlanId,
     controlPlayRuleIds:draft.controlPlayRuleIds??[],controlPauseRuleIds:draft.controlPauseRuleIds??[],
     historyDisplayLimit:draft.historyDisplayLimit??200,
+    analysisRoundLimit:draft.analysisRoundLimit??1_000,
+    bankrollStartAt:draft.bankrollStartAt??null,
     entryBlockPatterns:draft.entryBlockPatterns??[],
     operationCombinations:draft.operationCombinations??[],
     currentBankrollCents: draft.initialBankrollCents,
@@ -45,6 +47,8 @@ export function duplicateTerminal(source: Terminal, id: string, now: string): Te
     enabled: source.enabled,
     paused: true,
     historyDisplayLimit:source.historyDisplayLimit,
+    analysisRoundLimit:source.analysisRoundLimit,
+    bankrollStartAt:source.bankrollStartAt,
     entryBlockPatterns:[...source.entryBlockPatterns],
     operationCombinations:structuredClone(source.operationCombinations),
     initialBankrollCents: source.initialBankrollCents

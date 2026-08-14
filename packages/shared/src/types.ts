@@ -377,6 +377,8 @@ export interface Terminal {
   enabled: boolean;
   paused: boolean;
   historyDisplayLimit: number;
+  analysisRoundLimit: number;
+  bankrollStartAt: string | null;
   entryBlockPatterns: string[];
   operationCombinations: TerminalOperationCombination[];
   initialBankrollCents: number;
@@ -392,14 +394,54 @@ export interface TerminalOperationCombination {
   name: string;
   priority: number;
   enabled: boolean;
-  triggerType: 'PATTERN' | 'BET_STRATEGY';
+  triggerType: 'PATTERN' | 'BET_STRATEGY' | 'SEQUENCE_AI';
   pattern: string | null;
+  sequenceAiConfig?: SequenceAiConfig | null;
   betStrategyId: string;
   lossReentryType: 'IMMEDIATE' | 'PATTERN' | 'BET_STRATEGY';
   lossReentryPattern: string | null;
   lossReentryBetStrategyId: string | null;
   betPlanId: string;
   behavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS';
+}
+
+export interface SequenceAiConfig {
+  minWindow: number;
+  maxWindow: number;
+  minOccurrences: number;
+  minConfidence: number;
+  /** Bloqueia uma nova BASE quando a cauda atual ultrapassa este total de L. Zero desativa. */
+  maxCurrentLossStreak?: number;
+  /** Percentual minimo de janelas historicas que precisam apontar para W. */
+  minContextAgreement?: number;
+  /** Risco maximo aceito de perder todas as etapas BASE/Gales. Zero desativa. */
+  maxFullCycleLossRisk?: number;
+}
+
+export interface SequenceAiPrediction {
+  expected: 'W' | 'L' | null;
+  shouldEnter: boolean;
+  winProbability: number;
+  confidence: number;
+  sampleSize: number;
+  context: string;
+  contextLength: number;
+  periodicPattern: string | null;
+  currentLossStreak?: number;
+  contextAgreement?: number;
+  agreeingContexts?: number;
+  evaluatedContexts?: number;
+  fullCycleLossRisk?: number;
+  riskDepth?: number;
+  riskBlocked?: boolean;
+  reason: string;
+}
+
+export interface SequenceAiRuntime {
+  history: string;
+  observations: number;
+  transitions: Record<string,{wins:number;losses:number}>;
+  lastPrediction: SequenceAiPrediction | null;
 }
 
 export interface StrategyOption { id: string; name: string; sortOrder: number; }
@@ -447,6 +489,7 @@ export interface TerminalRuntime {
   terminalId: string;
   gameStrategyRuntime: { state: GameStrategyState; processedRounds: number; lastMultiplier: number | null; triggerRoundId: string | null; releaseProgress: number; lastAnnotationRole?: RoundAnnotationRole | null };
   resultAnalyzerState: ResultAnalyzerState;
+  sequenceAiRuntime: SequenceAiRuntime;
   betStrategyRuntime: { lastDecisionId: string | null; lastAction: BetAction | null; decisionCount: number; entryCount: number; ignoredCount: number };
   galeRuntime: { active: boolean; currentStage: number; cycleId: string | null; activeBetPlanId: string | null; activeCombinationId?:string|null; onWinBetPlanId: string | null; followUp: boolean; followUpBehavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS'; triggerLossStreakTarget?: number | null; triggerLossProgress?:number; previousAmountCents?: number; accumulatedLossCents?: number; waitingSignals?: number; entryConfirmed?:boolean; failedCycleAttempts?:number; preparedLegAmountsCents?: number[]; currentCycleWinCount?:number; currentCycleLossCount?:number; lastCycleWinCount?:number; lastCycleLossCount?:number; operationalPreparationKey?:string|null };
   bankrollState: BankrollMetrics;
@@ -465,6 +508,14 @@ export interface RoundEventBusSnapshot {
   subscribersByPlatform: Record<string, number>;
 }
 
+export interface TerminalUpdateState {
+  terminalId: string;
+  status: 'PENDING' | 'BACKGROUND' | 'FOREGROUND' | 'ERROR' | 'UPDATED';
+  progress: number;
+  error: string | null;
+  updatedAt: string;
+}
+
 export interface BootstrapData {
   session: UserSession | null;
   platforms: Platform[];
@@ -477,6 +528,7 @@ export interface BootstrapData {
   collectors: CollectorSnapshot[];
   terminalRuntimes: TerminalRuntime[];
   terminalHistories: Record<string, TerminalHistoryItem[]>;
+  terminalUpdateStates: Record<string, TerminalUpdateState>;
   terminalHistoryDisplayMax: number;
   screenProfiles: ScreenProfile[];
   terminalSchedules: TerminalSchedule[];
