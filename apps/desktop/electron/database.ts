@@ -37,6 +37,7 @@ export class AppDatabase {
     this.db.exec('PRAGMA foreign_keys = ON');
     this.migrate();
     this.seed();
+    this.ensure24HourHistoryDefault();
     this.installBuiltInPlatforms();
   }
 
@@ -66,7 +67,7 @@ export class AppDatabase {
       CREATE TABLE IF NOT EXISTS terminals (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, platform_id TEXT NOT NULL,
         game_strategy_id TEXT NOT NULL, bet_strategy_id TEXT NOT NULL, bet_strategy_win_id TEXT, bet_strategy_loss_id TEXT, bet_plan_id TEXT NOT NULL, bet_plan_win_id TEXT, bet_plan_loss_id TEXT,
-        screen_profile_id TEXT, mode TEXT NOT NULL, enabled INTEGER NOT NULL, paused INTEGER NOT NULL, history_display_limit INTEGER NOT NULL DEFAULT 200, analysis_round_limit INTEGER NOT NULL DEFAULT 1000, bankroll_start_at TEXT, entry_block_patterns_json TEXT NOT NULL DEFAULT '[]', operation_combinations_json TEXT NOT NULL DEFAULT '[]',
+        screen_profile_id TEXT, mode TEXT NOT NULL, enabled INTEGER NOT NULL, paused INTEGER NOT NULL, history_display_limit INTEGER NOT NULL DEFAULT 5000, analysis_round_limit INTEGER NOT NULL DEFAULT 5000, bankroll_start_at TEXT, entry_block_patterns_json TEXT NOT NULL DEFAULT '[]', operation_combinations_json TEXT NOT NULL DEFAULT '[]',
         initial_bankroll_cents INTEGER NOT NULL, current_bankroll_cents INTEGER NOT NULL,
         game_wins INTEGER NOT NULL DEFAULT 0, game_losses INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0,
@@ -181,6 +182,33 @@ export class AppDatabase {
       CREATE TABLE IF NOT EXISTS recovery_snapshots (id TEXT PRIMARY KEY, archive_json TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS terminal_presets (id TEXT PRIMARY KEY, name TEXT NOT NULL, snapshot_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS configuration_versions (id TEXT PRIMARY KEY, configuration_id TEXT NOT NULL, kind TEXT NOT NULL, version INTEGER NOT NULL, name TEXT NOT NULL, config_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(configuration_id, kind, version));
+      CREATE TABLE IF NOT EXISTS sequence_pattern_datasets (
+        dataset_key TEXT PRIMARY KEY, source_terminal_id TEXT NOT NULL, model_version TEXT NOT NULL,
+        signal_definition TEXT NOT NULL, observation_count INTEGER NOT NULL DEFAULT 0,
+        history TEXT NOT NULL DEFAULT '', first_observed_at TEXT, last_observed_at TEXT, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS sequence_pattern_observations (
+        dataset_key TEXT NOT NULL, source_signal_id TEXT NOT NULL, result TEXT NOT NULL,
+        occurred_at TEXT NOT NULL, PRIMARY KEY(dataset_key,source_signal_id),
+        FOREIGN KEY(dataset_key) REFERENCES sequence_pattern_datasets(dataset_key) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS sequence_pattern_stats (
+        dataset_key TEXT NOT NULL, context TEXT NOT NULL, context_length INTEGER NOT NULL,
+        wins INTEGER NOT NULL DEFAULT 0, losses INTEGER NOT NULL DEFAULT 0,
+        first_observed_at TEXT NOT NULL, last_observed_at TEXT NOT NULL,
+        PRIMARY KEY(dataset_key,context),
+        FOREIGN KEY(dataset_key) REFERENCES sequence_pattern_datasets(dataset_key) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS sequence_pattern_stats_lookup_idx ON sequence_pattern_stats(dataset_key,context_length,context);
+      CREATE TABLE IF NOT EXISTS sequence_ai_predictions (
+        id TEXT PRIMARY KEY, terminal_id TEXT NOT NULL, combination_id TEXT NOT NULL,
+        source_signal_id TEXT NOT NULL, settled_signal_id TEXT, dataset_key TEXT NOT NULL,
+        model_version TEXT NOT NULL, predicted_result TEXT, decision TEXT NOT NULL,
+        actual_result TEXT, prediction_json TEXT NOT NULL, created_at TEXT NOT NULL, settled_at TEXT,
+        UNIQUE(terminal_id,combination_id,source_signal_id,model_version),
+        FOREIGN KEY(terminal_id) REFERENCES terminals(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS sequence_ai_predictions_pending_idx ON sequence_ai_predictions(terminal_id,actual_result,created_at);
     `);
     for(const table of ['game_strategies','bet_strategies','bet_plans','schedule_plans','terminals','terminal_control_rules'])this.ensureColumn(table,'sort_order','INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('terminal_control_rules','resume_metric','TEXT');
@@ -193,16 +221,25 @@ export class AppDatabase {
     this.ensureColumn('terminals','strategy_source_terminal_id','TEXT');
     this.ensureColumn('terminals','strategy_source_mode',`TEXT NOT NULL DEFAULT 'GAME_SIGNALS'`);
     this.ensureColumn('terminals','history_display_limit','INTEGER NOT NULL DEFAULT 200');
-    this.ensureColumn('terminals','analysis_round_limit','INTEGER NOT NULL DEFAULT 1000');
+    this.ensureColumn('terminals','analysis_round_limit','INTEGER NOT NULL DEFAULT 5000');
     this.ensureColumn('terminals','bankroll_start_at','TEXT');
     this.ensureColumn('terminals','entry_block_patterns_json',`TEXT NOT NULL DEFAULT '[]'`);
     this.ensureColumn('terminals','operation_combinations_json',`TEXT NOT NULL DEFAULT '[]'`);
+    this.ensureColumn('sequence_pattern_datasets','history',`TEXT NOT NULL DEFAULT ''`);
     if(!this.getAppSetting<boolean>('terminal_history_default_200_migrated')){this.setAppSetting('terminal_history_display_max',200);this.setAppSetting('terminal_history_default_200_migrated',true);}
     this.db.exec('UPDATE terminals SET bet_strategy_win_id=bet_strategy_id WHERE bet_strategy_win_id IS NULL; UPDATE terminals SET bet_strategy_loss_id=bet_strategy_id WHERE bet_strategy_loss_id IS NULL; UPDATE terminals SET bet_plan_win_id=bet_plan_id WHERE bet_plan_win_id IS NULL; UPDATE terminals SET bet_plan_loss_id=bet_plan_id WHERE bet_plan_loss_id IS NULL');
     this.migrateGlobalControlRules();
   }
 
   close(){this.db.close();}
+
+  private ensure24HourHistoryDefault(){
+    if(this.getAppSetting<boolean>('terminal_history_24h_5000_migrated'))return;
+    this.setAppSetting('terminal_history_display_max',5_000);
+    this.db.exec('UPDATE terminals SET history_display_limit=5000 WHERE history_display_limit<=500');
+    this.db.exec('UPDATE terminals SET analysis_round_limit=5000 WHERE analysis_round_limit<=1000');
+    this.setAppSetting('terminal_history_24h_5000_migrated',true);
+  }
 
   private migrateGlobalControlRules(){
     if(this.getAppSetting<boolean>('global_control_rules_migrated'))return;
@@ -299,7 +336,7 @@ export class AppDatabase {
     const platforms = this.db.prepare('SELECT * FROM platforms ORDER BY name').all().map(mapPlatform);
     const terminals = this.listTerminals();
     const options = (table: string) => this.db.prepare(`SELECT id, name, sort_order AS sortOrder FROM ${table} ORDER BY CASE WHEN sort_order <= 0 THEN 1 ELSE 0 END, sort_order, name`).all() as { id: string; name: string; sortOrder:number }[];
-    const terminalHistoryDisplayMax=Math.max(10,Math.min(500,this.getAppSetting<number>('terminal_history_display_max')??200));
+    const terminalHistoryDisplayMax=Math.max(10,Math.min(5_000,this.getAppSetting<number>('terminal_history_display_max')??5_000));
     return { session: this.getSession(), platforms, terminals, gameStrategies: options('game_strategies'), betStrategies: options('bet_strategies'), betPlans: options('bet_plans'), schedulePlans: options('schedule_plans'), recentRounds: this.getRecentRounds(undefined, 40), collectors: [], terminalRuntimes: [], terminalHistories: Object.fromEntries(terminals.map(terminal => [terminal.id, this.getTerminalHistory(terminal.id, terminalHistoryDisplayMax)])),terminalUpdateStates:{},terminalHistoryDisplayMax, screenProfiles: this.getScreenProfiles(), terminalSchedules: this.getTerminalSchedules(),terminalControlRules:this.listTerminalControlRules(), eventBus: { publishedEvents: 0, deliveredEvents: 0, failedDeliveries: 0, subscribersByPlatform: {} } };
   }
 
@@ -451,7 +488,7 @@ export class AppDatabase {
     runtime.gameStrategyRuntime.triggerRoundId ??= null;
     runtime.gameStrategyRuntime.releaseProgress ??= 0;
     runtime.resultAnalyzerState = normalizeResultAnalyzerState(runtime.resultAnalyzerState);
-    runtime.sequenceAiRuntime={history:String(runtime.sequenceAiRuntime?.history??'').replace(/[^WL]/g,'').slice(-12),observations:Math.max(0,Number(runtime.sequenceAiRuntime?.observations)||0),transitions:runtime.sequenceAiRuntime?.transitions??{},lastPrediction:runtime.sequenceAiRuntime?.lastPrediction??null};
+    runtime.sequenceAiRuntime={history:String(runtime.sequenceAiRuntime?.history??'').replace(/[^WL]/g,'').slice(-5_000),observations:Math.max(0,Number(runtime.sequenceAiRuntime?.observations)||0),transitions:runtime.sequenceAiRuntime?.transitions??{},lastPrediction:runtime.sequenceAiRuntime?.lastPrediction??null,datasetKey:runtime.sequenceAiRuntime?.datasetKey??null,persistedObservations:Math.max(0,Number(runtime.sequenceAiRuntime?.persistedObservations)||0)};
     runtime.betStrategyRuntime = {
       lastDecisionId: runtime.betStrategyRuntime.lastDecisionId ?? null,
       lastAction: runtime.betStrategyRuntime.lastAction ?? null,
@@ -514,6 +551,44 @@ export class AppDatabase {
     this.log('GAME_STRATEGY', 'INFO', signal.result === 'WIN' ? 'WIN_DETECTED' : 'LOSS_DETECTED', { terminalId: signal.terminalId, signalId: signal.id, triggerRoundId: signal.triggerRoundId, resultRoundId: signal.resultRoundId });
   }
 
+  recordSequencePatternObservation(input:{datasetKey:string;sourceTerminalId:string;modelVersion:string;signalDefinition:string;sourceSignalId:string;result:'WIN'|'LOSS';contexts:string[];occurredAt:string}){
+    const now=new Date().toISOString();
+    this.db.prepare(`INSERT INTO sequence_pattern_datasets(dataset_key,source_terminal_id,model_version,signal_definition,observation_count,history,first_observed_at,last_observed_at,updated_at) VALUES(?,?,?,?,0,'',NULL,NULL,?) ON CONFLICT(dataset_key) DO UPDATE SET updated_at=excluded.updated_at`).run(input.datasetKey,input.sourceTerminalId,input.modelVersion,input.signalDefinition,now);
+    const inserted=this.db.prepare('INSERT OR IGNORE INTO sequence_pattern_observations(dataset_key,source_signal_id,result,occurred_at) VALUES(?,?,?,?)').run(input.datasetKey,input.sourceSignalId,input.result,input.occurredAt);
+    if(!inserted.changes)return Number((this.db.prepare('SELECT observation_count FROM sequence_pattern_datasets WHERE dataset_key=?').get(input.datasetKey) as {observation_count:number}).observation_count);
+    this.db.prepare(`UPDATE sequence_pattern_datasets SET observation_count=observation_count+1,history=substr(history||?,-5000),first_observed_at=COALESCE(first_observed_at,?),last_observed_at=?,updated_at=? WHERE dataset_key=?`).run(input.result==='WIN'?'W':'L',input.occurredAt,input.occurredAt,now,input.datasetKey);
+    const upsert=this.db.prepare(`INSERT INTO sequence_pattern_stats(dataset_key,context,context_length,wins,losses,first_observed_at,last_observed_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(dataset_key,context) DO UPDATE SET wins=wins+excluded.wins,losses=losses+excluded.losses,last_observed_at=excluded.last_observed_at`);
+    for(const context of input.contexts)upsert.run(input.datasetKey,context,context.length,input.result==='WIN'?1:0,input.result==='LOSS'?1:0,input.occurredAt,input.occurredAt);
+    return Number((this.db.prepare('SELECT observation_count FROM sequence_pattern_datasets WHERE dataset_key=?').get(input.datasetKey) as {observation_count:number}).observation_count);
+  }
+
+  replaceSequencePatternModel(input:{datasetKey:string;sourceTerminalId:string;modelVersion:string;signalDefinition:string;runtime:TerminalRuntime['sequenceAiRuntime'];observedAt:string}){
+    const existing=this.db.prepare('SELECT observation_count FROM sequence_pattern_datasets WHERE dataset_key=?').get(input.datasetKey) as {observation_count:number}|undefined;
+    if(existing&&Number(existing.observation_count)>input.runtime.observations)return Number(existing.observation_count);
+    const now=new Date().toISOString();this.db.exec('BEGIN IMMEDIATE');
+    try{
+      this.db.prepare(`INSERT INTO sequence_pattern_datasets(dataset_key,source_terminal_id,model_version,signal_definition,observation_count,history,first_observed_at,last_observed_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(dataset_key) DO UPDATE SET source_terminal_id=excluded.source_terminal_id,model_version=excluded.model_version,signal_definition=excluded.signal_definition,observation_count=excluded.observation_count,history=excluded.history,last_observed_at=excluded.last_observed_at,updated_at=excluded.updated_at`).run(input.datasetKey,input.sourceTerminalId,input.modelVersion,input.signalDefinition,input.runtime.observations,input.runtime.history.slice(-5000),input.observedAt,input.observedAt,now);
+      this.db.prepare('DELETE FROM sequence_pattern_stats WHERE dataset_key=?').run(input.datasetKey);this.db.prepare('DELETE FROM sequence_pattern_observations WHERE dataset_key=?').run(input.datasetKey);
+      const insert=this.db.prepare('INSERT INTO sequence_pattern_stats(dataset_key,context,context_length,wins,losses,first_observed_at,last_observed_at) VALUES(?,?,?,?,?,?,?)');for(const[context,counts]of Object.entries(input.runtime.transitions))insert.run(input.datasetKey,context,context.length,counts.wins,counts.losses,input.observedAt,input.observedAt);
+      this.db.exec('COMMIT');return input.runtime.observations;
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
+
+  getSequencePatternModel(datasetKey:string):TerminalRuntime['sequenceAiRuntime']|null{
+    const dataset=this.db.prepare('SELECT observation_count,history FROM sequence_pattern_datasets WHERE dataset_key=?').get(datasetKey) as {observation_count:number;history:string}|undefined;if(!dataset)return null;
+    const stats=this.db.prepare('SELECT context,wins,losses FROM sequence_pattern_stats WHERE dataset_key=?').all(datasetKey) as Array<{context:string;wins:number;losses:number}>;const transitions:TerminalRuntime['sequenceAiRuntime']['transitions']={};for(const row of stats)transitions[row.context]={wins:Number(row.wins),losses:Number(row.losses)};
+    const history=String(dataset.history??'').replace(/[^WL]/g,'').slice(-5000);
+    return{history,observations:Number(dataset.observation_count),transitions,lastPrediction:null,datasetKey,persistedObservations:Number(dataset.observation_count)};
+  }
+
+  saveSequencePrediction(input:{terminalId:string;combinationId:string;sourceSignalId:string;datasetKey:string;modelVersion:string;predictedResult:'W'|'L'|null;decision:'ENTER'|'IGNORE';prediction:unknown;createdAt:string}){
+    this.db.prepare(`INSERT OR IGNORE INTO sequence_ai_predictions(id,terminal_id,combination_id,source_signal_id,dataset_key,model_version,predicted_result,decision,prediction_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(randomUUID(),input.terminalId,input.combinationId,input.sourceSignalId,input.datasetKey,input.modelVersion,input.predictedResult,input.decision,JSON.stringify(input.prediction),input.createdAt);
+  }
+
+  settleSequencePredictions(terminalId:string,actualResult:'WIN'|'LOSS',settledSignalId:string,settledAt:string){
+    this.db.prepare(`UPDATE sequence_ai_predictions SET actual_result=?,settled_signal_id=?,settled_at=? WHERE terminal_id=? AND actual_result IS NULL AND source_signal_id<>?`).run(actualResult==='WIN'?'W':'L',settledSignalId,settledAt,terminalId,settledSignalId);
+  }
+
   getBetStrategyConfig(id: string): BetStrategyConfig | null {
     const row = this.db.prepare('SELECT name, config_json FROM bet_strategies WHERE id = ?').get(id) as { name: string; config_json: string } | undefined;
     return row ? normalizeBetStrategyConfig(id, row.name, JSON.parse(row.config_json) as unknown) : null;
@@ -529,7 +604,7 @@ export class AppDatabase {
     const row = this.db.prepare('SELECT config_json FROM bet_plans WHERE id = ?').get(id) as { config_json: string } | undefined;
     if (!row) return 1;
     const config = JSON.parse(row.config_json) as { stages?: number | unknown[] };
-    return Math.max(1, Math.min(20, Array.isArray(config.stages) ? config.stages.length : Number(config.stages ?? 1)));
+    return Math.max(1, Math.min(51, Array.isArray(config.stages) ? config.stages.length : Number(config.stages ?? 1)));
   }
 
   getBetPlanConfig(id: string): BetPlanConfig | null {
@@ -700,7 +775,7 @@ export class AppDatabase {
       const configSql = (table:string) => this.db.prepare(`INSERT INTO ${table} (id,name,config_json,sort_order) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,config_json=excluded.config_json,sort_order=excluded.sort_order`);
       for (const [table, items] of [['game_strategies',archive.gameStrategies],['bet_strategies',archive.betStrategies],['bet_plans',archive.betPlans],['schedule_plans',archive.schedulePlans??[]]] as const) { const statement=configSql(table); for(const item of items) statement.run(item.id,item.name,JSON.stringify(item.config),item.sortOrder); }
       const terminalSql = `INSERT INTO terminals (id,name,platform_id,game_strategy_id,strategy_source_terminal_id,strategy_source_mode,bet_strategy_id,bet_strategy_win_id,bet_strategy_loss_id,bet_plan_id,bet_plan_win_id,bet_plan_loss_id,screen_profile_id,mode,enabled,paused,history_display_limit,analysis_round_limit,bankroll_start_at,entry_block_patterns_json,operation_combinations_json,initial_bankroll_cents,current_bankroll_cents,game_wins,game_losses,created_at,updated_at,sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,sort_order=excluded.sort_order,platform_id=excluded.platform_id,game_strategy_id=excluded.game_strategy_id,strategy_source_terminal_id=excluded.strategy_source_terminal_id,strategy_source_mode=excluded.strategy_source_mode,bet_strategy_id=excluded.bet_strategy_id,bet_strategy_win_id=excluded.bet_strategy_win_id,bet_strategy_loss_id=excluded.bet_strategy_loss_id,bet_plan_id=excluded.bet_plan_id,bet_plan_win_id=excluded.bet_plan_win_id,bet_plan_loss_id=excluded.bet_plan_loss_id,screen_profile_id=excluded.screen_profile_id,mode=excluded.mode,enabled=excluded.enabled,paused=excluded.paused,history_display_limit=excluded.history_display_limit,analysis_round_limit=excluded.analysis_round_limit,bankroll_start_at=excluded.bankroll_start_at,entry_block_patterns_json=excluded.entry_block_patterns_json,operation_combinations_json=excluded.operation_combinations_json,initial_bankroll_cents=excluded.initial_bankroll_cents,current_bankroll_cents=excluded.current_bankroll_cents,updated_at=excluded.updated_at`;
-      for (const item of archive.terminals) this.db.prepare(terminalSql).run(item.id,item.name,item.platformId,item.gameStrategyId,item.strategySourceTerminalId,item.strategySourceMode,item.betStrategyId,item.betStrategyWinId,item.betStrategyLossId,item.betPlanId,item.betPlanWinId,item.betPlanLossId,item.screenProfileId,item.mode,Number(item.enabled),Number(item.paused),item.historyDisplayLimit??200,item.analysisRoundLimit??1_000,item.bankrollStartAt??null,JSON.stringify(item.entryBlockPatterns??[]),JSON.stringify(item.operationCombinations??[]),item.initialBankrollCents,item.currentBankrollCents,item.gameWins,item.gameLosses,item.createdAt,item.updatedAt,item.sortOrder);
+      for (const item of archive.terminals) this.db.prepare(terminalSql).run(item.id,item.name,item.platformId,item.gameStrategyId,item.strategySourceTerminalId,item.strategySourceMode,item.betStrategyId,item.betStrategyWinId,item.betStrategyLossId,item.betPlanId,item.betPlanWinId,item.betPlanLossId,item.screenProfileId,item.mode,Number(item.enabled),Number(item.paused),item.historyDisplayLimit??5_000,item.analysisRoundLimit??5_000,item.bankrollStartAt??null,JSON.stringify(item.entryBlockPatterns??[]),JSON.stringify(item.operationCombinations??[]),item.initialBankrollCents,item.currentBankrollCents,item.gameWins,item.gameLosses,item.createdAt,item.updatedAt,item.sortOrder);
       const profileSql = `INSERT INTO screen_profiles VALUES (?, ?, ?, ?, ?) ON CONFLICT(terminal_id) DO UPDATE SET name=excluded.name,config_json=excluded.config_json,updated_at=excluded.updated_at`;
       for (const item of archive.screenProfiles) { const config={resolutionWidth:item.resolutionWidth,resolutionHeight:item.resolutionHeight,windowTitle:item.windowTitle,monitorIndex:item.monitorIndex??null,calibratedAt:item.calibratedAt??null,bet1:item.bet1,bet2:item.bet2}; this.db.prepare(profileSql).run(item.id,item.terminalId,item.name,JSON.stringify(config),item.updatedAt); this.db.prepare('UPDATE terminals SET screen_profile_id=? WHERE id=?').run(item.id,item.terminalId); }
       for(const item of archive.terminalSchedules??[])this.db.prepare('INSERT INTO terminal_schedule_assignments VALUES (?, ?, ?) ON CONFLICT(terminal_id) DO UPDATE SET schedule_plan_id=excluded.schedule_plan_id,updated_at=excluded.updated_at').run(item.terminalId,item.schedulePlanId,item.updatedAt);
@@ -742,7 +817,7 @@ export class AppDatabase {
     const controlIds=new Map<string,string>();for(const source of snapshot.controlRules){const copy=this.saveTerminalControlRule({id:null,name:`${prefix} • ${source.name}`,sortOrder:source.sortOrder,enabled:source.enabled,metric:source.metric,operator:source.operator,value:source.value,referenceMetric:source.referenceMetric,action:source.action});controlIds.set(source.id,copy.id);}
     const schedule=snapshot.schedulePlan?this.saveConfiguration({id:null,kind:'SCHEDULE_PLAN',name:`${prefix} • ${snapshot.schedulePlan.name}`,sortOrder:snapshot.schedulePlan.sortOrder,config:structuredClone(snapshot.schedulePlan.config)}):null;
     const operationCombinations=(snapshot.terminal.operationCombinations??[]).map(item=>({...item,betStrategyId:strategyId(item.betStrategyId)!,lossReentryBetStrategyId:item.lossReentryBetStrategyId?strategyId(item.lossReentryBetStrategyId)??null:null,betPlanId:planId(item.betPlanId)!})).filter(item=>Boolean(item.betStrategyId&&item.betPlanId));
-  return{draft:{name:`${snapshot.terminal.name} (restaurado)`,sortOrder:snapshot.terminal.sortOrder,platformId:platform.id,gameStrategyId:game.id,strategySourceTerminalId:null,strategySourceMode:'GAME_SIGNALS' as const,betStrategyId:strategyId(snapshot.terminal.betStrategyLossId)!,betStrategyWinId:strategyId(snapshot.terminal.betStrategyWinId)!,betStrategyLossId:strategyId(snapshot.terminal.betStrategyLossId)!,betPlanId:planId(snapshot.terminal.betPlanLossId)!,betPlanWinId:planId(snapshot.terminal.betPlanWinId)!,betPlanLossId:planId(snapshot.terminal.betPlanLossId)!,entryBlockPatterns:[...(snapshot.terminal.entryBlockPatterns??[])],operationCombinations,controlPlayRuleIds:snapshot.terminal.controlPlayRuleIds.map(ruleId=>controlIds.get(ruleId)).filter((ruleId):ruleId is string=>Boolean(ruleId)),controlPauseRuleIds:snapshot.terminal.controlPauseRuleIds.map(ruleId=>controlIds.get(ruleId)).filter((ruleId):ruleId is string=>Boolean(ruleId)),screenProfileId:null,mode:snapshot.terminal.mode,enabled:true,paused:true,historyDisplayLimit:snapshot.terminal.historyDisplayLimit??200,analysisRoundLimit:snapshot.terminal.analysisRoundLimit??1_000,bankrollStartAt:snapshot.terminal.bankrollStartAt??null,initialBankrollCents:snapshot.terminal.initialBankrollCents},schedulePlanId:schedule?.id??null,screenProfile:snapshot.screenProfile};
+  return{draft:{name:`${snapshot.terminal.name} (restaurado)`,sortOrder:snapshot.terminal.sortOrder,platformId:platform.id,gameStrategyId:game.id,strategySourceTerminalId:null,strategySourceMode:'GAME_SIGNALS' as const,betStrategyId:strategyId(snapshot.terminal.betStrategyLossId)!,betStrategyWinId:strategyId(snapshot.terminal.betStrategyWinId)!,betStrategyLossId:strategyId(snapshot.terminal.betStrategyLossId)!,betPlanId:planId(snapshot.terminal.betPlanLossId)!,betPlanWinId:planId(snapshot.terminal.betPlanWinId)!,betPlanLossId:planId(snapshot.terminal.betPlanLossId)!,entryBlockPatterns:[...(snapshot.terminal.entryBlockPatterns??[])],operationCombinations,controlPlayRuleIds:snapshot.terminal.controlPlayRuleIds.map(ruleId=>controlIds.get(ruleId)).filter((ruleId):ruleId is string=>Boolean(ruleId)),controlPauseRuleIds:snapshot.terminal.controlPauseRuleIds.map(ruleId=>controlIds.get(ruleId)).filter((ruleId):ruleId is string=>Boolean(ruleId)),screenProfileId:null,mode:snapshot.terminal.mode,enabled:true,paused:true,historyDisplayLimit:snapshot.terminal.historyDisplayLimit??5_000,analysisRoundLimit:snapshot.terminal.analysisRoundLimit??5_000,bankrollStartAt:snapshot.terminal.bankrollStartAt??null,initialBankrollCents:snapshot.terminal.initialBankrollCents},schedulePlanId:schedule?.id??null,screenProfile:snapshot.screenProfile};
   }
 
   listRecoverySnapshots():RecoverySnapshot[]{return(this.db.prepare('SELECT id,archive_json,created_at FROM recovery_snapshots ORDER BY created_at DESC LIMIT 20').all() as Array<{id:string;archive_json:string;created_at:string}>).map(row=>{const archive=JSON.parse(row.archive_json) as WorkspaceArchive;return{id:row.id,createdAt:row.created_at,platforms:archive.platforms.length,terminals:archive.terminals.length}});}
@@ -799,9 +874,9 @@ function mapPlatform(value: unknown): Platform {
 
 function mapTerminal(value: unknown): Terminal {
   const r = value as Record<string, string | number | null>;
-  let operationCombinations:Terminal['operationCombinations']=[];try{const parsed=JSON.parse(String(r.operation_combinations_json??'[]')) as Array<Partial<Terminal['operationCombinations'][number]>>;operationCombinations=parsed.map(item=>({...item,triggerType:item.triggerType??'BET_STRATEGY',pattern:item.pattern??null,sequenceAiConfig:item.sequenceAiConfig??null,lossReentryType:item.lossReentryType??'BET_STRATEGY',lossReentryPattern:item.lossReentryPattern??null,lossReentryBetStrategyId:item.lossReentryBetStrategyId??null} as Terminal['operationCombinations'][number]));}catch{operationCombinations=[];}
+  let operationCombinations:Terminal['operationCombinations']=[];try{const parsed=JSON.parse(String(r.operation_combinations_json??'[]')) as Array<Partial<Terminal['operationCombinations'][number]>>;operationCombinations=parsed.map(item=>({...item,triggerType:item.triggerType??'BET_STRATEGY',pattern:item.pattern??null,sequenceAiConfig:item.sequenceAiConfig?{...item.sequenceAiConfig,engineVersion:item.sequenceAiConfig.engineVersion??'V1'}:null,lossReentryType:item.lossReentryType??'BET_STRATEGY',lossReentryPattern:item.lossReentryPattern??null,lossReentryBetStrategyId:item.lossReentryBetStrategyId??null} as Terminal['operationCombinations'][number]));}catch{operationCombinations=[];}
   let entryBlockPatterns:string[]=[];try{const parsed=JSON.parse(String(r.entry_block_patterns_json??'[]'));if(Array.isArray(parsed))entryBlockPatterns=parsed.map(String).map(item=>item.toUpperCase()).filter(item=>/^[WL]+$/.test(item));}catch{entryBlockPatterns=[];}
-  return { id: String(r.id), name: String(r.name), sortOrder:Number(r.sort_order)||0, platformId: String(r.platform_id), gameStrategyId: String(r.game_strategy_id),strategySourceTerminalId:r.strategy_source_terminal_id?String(r.strategy_source_terminal_id):null,strategySourceMode:String(r.strategy_source_mode??'GAME_SIGNALS') as Terminal['strategySourceMode'], betStrategyId: String(r.bet_strategy_id),betStrategyWinId:String(r.bet_strategy_win_id??r.bet_strategy_id),betStrategyLossId:String(r.bet_strategy_loss_id??r.bet_strategy_id), betPlanId: String(r.bet_plan_id),betPlanWinId:String(r.bet_plan_win_id??r.bet_plan_id),betPlanLossId:String(r.bet_plan_loss_id??r.bet_plan_id),controlPlayRuleIds:[],controlPauseRuleIds:[], screenProfileId: r.screen_profile_id ? String(r.screen_profile_id) : null, mode: String(r.mode) as Terminal['mode'], enabled: Boolean(r.enabled), paused: Boolean(r.paused),historyDisplayLimit:Math.max(10,Math.min(500,Number(r.history_display_limit)||200)),analysisRoundLimit:Math.max(200,Math.min(10_000,Number(r.analysis_round_limit)||1_000)),bankrollStartAt:r.bankroll_start_at?String(r.bankroll_start_at):null,entryBlockPatterns,operationCombinations, initialBankrollCents: Number(r.initial_bankroll_cents), currentBankrollCents: Number(r.current_bankroll_cents), gameWins: Number(r.game_wins), gameLosses: Number(r.game_losses), createdAt: String(r.created_at), updatedAt: String(r.updated_at) };
+  return { id: String(r.id), name: String(r.name), sortOrder:Number(r.sort_order)||0, platformId: String(r.platform_id), gameStrategyId: String(r.game_strategy_id),strategySourceTerminalId:r.strategy_source_terminal_id?String(r.strategy_source_terminal_id):null,strategySourceMode:String(r.strategy_source_mode??'GAME_SIGNALS') as Terminal['strategySourceMode'], betStrategyId: String(r.bet_strategy_id),betStrategyWinId:String(r.bet_strategy_win_id??r.bet_strategy_id),betStrategyLossId:String(r.bet_strategy_loss_id??r.bet_strategy_id), betPlanId: String(r.bet_plan_id),betPlanWinId:String(r.bet_plan_win_id??r.bet_plan_id),betPlanLossId:String(r.bet_plan_loss_id??r.bet_plan_id),controlPlayRuleIds:[],controlPauseRuleIds:[], screenProfileId: r.screen_profile_id ? String(r.screen_profile_id) : null, mode: String(r.mode) as Terminal['mode'], enabled: Boolean(r.enabled), paused: Boolean(r.paused),historyDisplayLimit:Math.max(10,Math.min(5_000,Number(r.history_display_limit)||5_000)),analysisRoundLimit:Math.max(200,Math.min(300_000,Number(r.analysis_round_limit)||5_000)),bankrollStartAt:r.bankroll_start_at?String(r.bankroll_start_at):null,entryBlockPatterns,operationCombinations, initialBankrollCents: Number(r.initial_bankroll_cents), currentBankrollCents: Number(r.current_bankroll_cents), gameWins: Number(r.game_wins), gameLosses: Number(r.game_losses), createdAt: String(r.created_at), updatedAt: String(r.updated_at) };
 }
 
 function mapRound(value: unknown): NormalizedRound {
@@ -851,7 +926,7 @@ function normalizeBetStrategyConfig(id: string, name: string, value: unknown): B
 function normalizeBetPlanConfig(value: unknown): BetPlanConfig {
   const config = value as { stages?: number | BetPlanConfig['stages']; legs?: number };
   if (Array.isArray(config.stages)) return value as BetPlanConfig;
-  const stageCount = Math.max(1, Math.min(20, Number(config.stages ?? 1)));
+  const stageCount = Math.max(1, Math.min(51, Number(config.stages ?? 1)));
   const legCount = Math.max(1, Math.min(10, Number(config.legs ?? 1)));
   return { stages: Array.from({ length: stageCount }, (_, stageIndex) => ({
     index: stageIndex, label: stageIndex === 0 ? 'BASE' : `GALE ${stageIndex}`,

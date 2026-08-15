@@ -234,11 +234,10 @@ describe('TerminalManager', () => {
     expect(runtime.galeRuntime.active).toBe(false);
   });
 
-  it('enters BASE with the copy and advances G1 through G3 on every following physical round',async()=>{
+  it('without combinations, enters BASE with the copy and advances G1 through G3 on every following physical round',async()=>{
     const repository=new MemoryRepository();const copy=makeTerminal('Cópia operacional');copy.enabled=false;
     const third=makeTerminal('Terminal 03');third.strategySourceTerminalId=copy.id;third.strategySourceMode='BET_EXECUTIONS';
     third.entryBlockPatterns=['L'];
-    third.operationCombinations=[{id:'after-copy-win',name:'Após W da cópia',priority:1,enabled:true,triggerType:'PATTERN',pattern:'W',betStrategyId:third.betStrategyId,lossReentryType:'IMMEDIATE',lossReentryPattern:null,lossReentryBetStrategyId:null,betPlanId:third.betPlanId,behavior:'RUN_ONCE'}];
     repository.betPlanConfig={stages:[
       {index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:2}]},
       {index:1,label:'GALE 1',legs:[{slot:1,amountCents:200,cashout:2}]},
@@ -259,6 +258,18 @@ describe('TerminalManager', () => {
     expect(manager.getRuntime(third.id)?.galeRuntime.active).toBe(false);
     await manager.routeRoundToTerminals(makeRound(8.8));
     expect(repository.executions.filter(item=>item.terminalId===third.id)).toHaveLength(4);
+  });
+
+  it('does not arm an operational BASE when an enabled sequence AI combination returns IGNORE',async()=>{
+    const repository=new MemoryRepository();const copy=makeTerminal('Cópia operacional IA');copy.enabled=false;
+    const third=makeTerminal('Terminal 03 IA');third.strategySourceTerminalId=copy.id;third.strategySourceMode='BET_EXECUTIONS';
+    third.operationCombinations=[{id:'sequence-ai-operational',name:'IA operacional',priority:1,enabled:true,triggerType:'SEQUENCE_AI',pattern:null,sequenceAiConfig:{minWindow:2,maxWindow:12,minOccurrences:10_000,minConfidence:60,maxCurrentLossStreak:3,minContextAgreement:60,maxFullCycleLossRisk:5},betStrategyId:third.betStrategyId,lossReentryType:'IMMEDIATE',lossReentryPattern:null,lossReentryBetStrategyId:null,betPlanId:third.betPlanId,behavior:'RUN_ONCE'}];
+    repository.saveTerminal(copy);repository.saveTerminal(third);const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    const round=makeRound(1.01);const signal:GameSignal={id:crypto.randomUUID(),terminalId:copy.id,platformId:copy.platformId,strategyId:copy.gameStrategyId,triggerRoundId:round.id,resultRoundId:round.id,result:'LOSS',metadata:{multiplier:1.01},createdAt:round.occurredAt};repository.signals.push(signal);repository.executions.push({id:crypto.randomUUID(),cycleId:crypto.randomUUID(),terminalId:copy.id,gameSignalId:signal.id,stageIndex:0,stageLabel:'BASE',multiplier:1.01,stakeCents:100,returnedCents:0,profitLossCents:-100,bankrollBeforeCents:10_000,bankrollAfterCents:9_900,result:'LOSS',createdAt:round.occurredAt});
+    await manager.routeRoundToTerminals(round);
+    expect(repository.decisions.filter(item=>item.terminalId===third.id).at(-1)?.action).toBe('IGNORE');
+    expect(repository.executions.filter(item=>item.terminalId===third.id)).toHaveLength(0);
+    expect(manager.getRuntime(third.id)?.galeRuntime.active).toBe(false);
   });
 
   it('blocks a new operational BASE when recent history ends with a prohibited W/L sequence',async()=>{
@@ -307,6 +318,15 @@ describe('TerminalManager', () => {
     for (const multiplier of [1.72,1.25,2.27,1.25,2.27,1.25,2.27,2.5]) await manager.routeRoundToTerminals(makeRound(multiplier));
     expect(repository.stages.map(stage => `${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS', 'GALE 1:WIN']);
     expect(manager.getRuntime(terminal.id)?.galeRuntime.active).toBe(false);
+  });
+
+  it('blocks an unaffordable stage without recording a zero-value LOSS or advancing the Gale',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Banca insuficiente');terminal.initialBankrollCents=50;terminal.currentBankrollCents=50;repository.saveTerminal(terminal);
+    const preparations:number[]=[];const manager=new TerminalManager(repository,new RoundEventBus());manager.setAssistedPreparationHandler(request=>{preparations.push(request.stageIndex)});manager.initialize();
+    for(const multiplier of[1.72,1.25,2.27,1.25,2.27,1.25,2.27,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.executions).toHaveLength(0);expect(repository.stages).toHaveLength(0);expect(preparations).toHaveLength(0);
+    expect(manager.getRuntime(terminal.id)).toMatchObject({status:'PAUSED',pauseState:{reason:'Saldo insuficiente'},bankrollState:{currentBalanceCents:50,stopReason:'Saldo insuficiente'},galeRuntime:{active:true,currentStage:0}});
+    expect(manager.resumeTerminal(terminal.id)).toBe(false);
   });
 
   it('waits for a new ENTER confirmation before executing the next Gale',async()=>{

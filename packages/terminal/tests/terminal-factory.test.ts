@@ -14,8 +14,8 @@ describe('terminal factory', () => {
     expect(terminal.currentBankrollCents).toBe(10_000);
     expect(terminal.gameWins).toBe(0);
     expect(terminal.gameLosses).toBe(0);
-    expect(terminal.historyDisplayLimit).toBe(200);
-    expect(terminal.analysisRoundLimit).toBe(1_000);
+    expect(terminal.historyDisplayLimit).toBe(5_000);
+    expect(terminal.analysisRoundLimit).toBe(5_000);
   });
 
   it('duplicates configuration but never operational state or identity', () => {

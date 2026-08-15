@@ -36,11 +36,9 @@ let archivePublishTimer: ReturnType<typeof setInterval> | null = null;
 const INTERFACE_SCALES = new Set([0.8, 0.9, 1, 1.1, 1.25]);
 const terminalUpdateStates=new Map<string,TerminalUpdateState>();
 const terminalUpdateSnapshots=new Map<string,{terminal:Terminal;runtime:TerminalRuntime|null;history:TerminalHistoryItem[]}>();
-const terminalUpdateQueue:string[]=[];
-const foregroundTerminalIds=new Set<string>();
-const terminalUpdateRerunIds=new Set<string>();
-const terminalFullUpdateIds=new Set<string>();
-let terminalUpdateQueueRunning=false;
+const terminalUpdateDirtyIds=new Set<string>();
+const TERMINAL_PENDING_UPDATES_SETTING='terminal_pending_updates';
+let terminalUpdateRunning=false;
 
 function createSplashWindow() {
   splashStartedAt = Date.now();
@@ -156,6 +154,7 @@ app.whenReady()
     updateSplash('Abrindo banco de dados local...', 18);
     console.info('[SYSTEM] Electron ready; initializing SQLite.');
     database = new AppDatabase(path.join(app.getPath('userData'), 'aviator-strategy-lab.db'));
+    hydratePendingTerminalUpdates();
     archiveDatabase = new ArchiveDatabase(path.join(app.getPath('userData'), 'aviator-round-archive.db'));
     archiveSync = new ArchiveSyncService(archiveDatabase);
     const archiveConfiguration = database.getAppSetting<{ directory: string; mode: 'PUBLISHER' | 'SUBSCRIBER' }>('archive_sync');
@@ -169,6 +168,7 @@ app.whenReady()
     roundEventBus = new RoundEventBus();
     terminalManager = new TerminalManager(database, roundEventBus);
     terminalManager.initialize();
+    for(const terminalId of terminalUpdateStates.keys())terminalManager.requireConfigurationUpdate(terminalId);
     screenAutomation = new ScreenAutomationService();
     terminalManager.setAssistedPreparationHandler(async request => {
       const terminal = database.getTerminal(request.terminalId); if (!terminal || request.deliveryMode !== 'LIVE' || terminal.mode !== 'ASSISTED' || !terminal.enabled || terminal.paused || screenAutomation.isPaused()) return;
@@ -233,7 +233,7 @@ function registerIpc() {
   ipcMain.handle('display:terminal-history-max:get',():ApiResult<number>=>success(getTerminalHistoryDisplayMax()));
   ipcMain.handle('display:terminal-history-max:set',(_event,raw):ApiResult<number>=>{
     const value=Number(raw);
-    if(!Number.isInteger(value)||value<10||value>500)return failure('Quantidade de bolinhas inválida.');
+    if(!Number.isInteger(value)||value<10||value>5_000)return failure('Quantidade de bolinhas inválida.');
     database.setAppSetting('terminal_history_display_max',value);notifyDataChanged();return success(value);
   });
   ipcMain.handle('auth:login', (_event, raw): ApiResult<UserSession> => {
@@ -247,19 +247,19 @@ function registerIpc() {
     const parsed = createTerminalInputSchema.safeParse(raw);
     if (!parsed.success) return failure('Configuração do Terminal inválida.');
     const value = {...parsed.data,historyDisplayLimit:Math.min(parsed.data.historyDisplayLimit,getTerminalHistoryDisplayMax())};
-    try{const terminal = terminalManager.createTerminal({ ...value, screenProfileId: null, enabled: true, paused: false });enqueueTerminalTree(terminal.id,false,false);return success(terminal);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível criar o Terminal.');}
+    try{const terminal = terminalManager.createTerminal({ ...value, screenProfileId: null, enabled: true, paused: false });markTerminalTreePending(terminal.id);return success(terminal);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível criar o Terminal.');}
   });
   ipcMain.handle('terminal:duplicate', (_event, raw): ApiResult<Terminal> => {
     const parsed = terminalIdSchema.safeParse(raw);
     if (!parsed.success) return failure('Terminal não encontrado.');
     const copy = terminalManager.duplicateTerminal(parsed.data);
     if (!copy) return failure('Terminal não encontrado.');
-    enqueueTerminalTree(copy.id,false,false);
+    markTerminalTreePending(copy.id);
     return success(copy);
   });
   ipcMain.handle('terminal-preset:save',(_event,raw):ApiResult<TerminalPreset>=>{const parsed=saveTerminalPresetSchema.safeParse(raw);if(!parsed.success)return failure('Nome ou Terminal inválido.');try{const preset=database.saveTerminalPreset(parsed.data.terminalId,parsed.data.name);notifyDataChanged();return success(preset);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível salvar a configuração.');}});
   ipcMain.handle('terminal-preset:list',():ApiResult<TerminalPreset[]>=>success(database.listTerminalPresets()));
-  ipcMain.handle('terminal-preset:restore',(_event,raw):ApiResult<Terminal>=>{const parsed=terminalPresetIdSchema.safeParse(raw);if(!parsed.success)return failure('Configuração salva inválida.');try{const restored=database.restoreTerminalPresetConfigurations(parsed.data);const terminal=terminalManager.createTerminal(restored.draft);if(restored.schedulePlanId)database.setTerminalSchedulePlan(terminal.id,restored.schedulePlanId);if(restored.screenProfile){database.saveScreenProfile({...restored.screenProfile,id:randomUUID(),terminalId:terminal.id,name:`${terminal.name} • Bot`,updatedAt:new Date().toISOString()});}enqueueTerminalTree(terminal.id);notifyDataChanged();return success(database.getTerminal(terminal.id)??terminal);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível restaurar o Terminal.');}});
+  ipcMain.handle('terminal-preset:restore',(_event,raw):ApiResult<Terminal>=>{const parsed=terminalPresetIdSchema.safeParse(raw);if(!parsed.success)return failure('Configuração salva inválida.');try{const restored=database.restoreTerminalPresetConfigurations(parsed.data);const terminal=terminalManager.createTerminal(restored.draft);if(restored.schedulePlanId)database.setTerminalSchedulePlan(terminal.id,restored.schedulePlanId);if(restored.screenProfile){database.saveScreenProfile({...restored.screenProfile,id:randomUUID(),terminalId:terminal.id,name:`${terminal.name} • Bot`,updatedAt:new Date().toISOString()});}markTerminalTreePending(terminal.id);notifyDataChanged();return success(database.getTerminal(terminal.id)??terminal);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível restaurar o Terminal.');}});
   ipcMain.handle('terminal-preset:delete',(_event,raw):ApiResult<boolean>=>{const parsed=terminalPresetIdSchema.safeParse(raw);if(!parsed.success)return failure('Configuração salva inválida.');database.deleteTerminalPreset(parsed.data);notifyDataChanged();return success(true);});
   ipcMain.handle('terminal:update', (_event, raw): ApiResult<Terminal> => {
     const parsed = updateTerminalInputSchema.safeParse(raw);
@@ -269,25 +269,26 @@ function registerIpc() {
     const previous=database.getTerminal(id);
     let terminal:Terminal|null;try{terminal = terminalManager.updateTerminal(id, update);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível atualizar o Terminal.');}
     if (!terminal) return failure('Terminal não encontrado.');
-    if(previous&&terminalAnalysisConfigurationChanged(previous,terminal))enqueueTerminalTree(id,false,false);
+    if(previous&&terminalAnalysisConfigurationChanged(previous,terminal))markTerminalTreePending(id);
     notifyDataChanged();
     return success(terminal);
   });
-  ipcMain.handle('terminal:sync',(_event,raw):ApiResult<boolean>=>{
+  ipcMain.handle('terminal:sync',async(_event,raw):Promise<ApiResult<boolean>>=>{
     const parsed=terminalIdSchema.safeParse(raw);
     if(!parsed.success||!database.getTerminal(parsed.data))return failure('Terminal não encontrado.');
-    enqueueTerminalTree(parsed.data,true,false,false);
-    notifyDataChanged();return success(true);
+    try{await updateTerminalDependencyChain(parsed.data);return success(true);}catch(error){return failure(error instanceof Error?error.message:'Falha ao atualizar o Terminal.');}
   });
   ipcMain.handle('terminal:set-paused', (_event, raw): ApiResult<boolean> => {
     const parsed = terminalIdSchema.safeParse(raw?.id);
     if (!parsed.success || typeof raw?.paused !== 'boolean') return failure('Operação inválida.');
-    if (raw.paused) terminalManager.pauseTerminal(parsed.data); else terminalManager.resumeTerminal(parsed.data);
+    if(!raw.paused&&(terminalUpdateStates.get(parsed.data)?.status==='PENDING'||terminalUpdateStates.get(parsed.data)?.status==='ERROR'))return failure('Atualize o Terminal antes de retomá-lo.');
+    if (raw.paused) terminalManager.pauseTerminal(parsed.data); else if(!terminalManager.resumeTerminal(parsed.data)){const reason=terminalManager.getRuntime(parsed.data)?.pauseState.reason??'A banca não permite retomar este Terminal.';notifyDataChanged();return failure(reason);}
+    notifyDataChanged();
     return success(true);
   });
-  ipcMain.handle('terminal:set-schedule-plan',(_event,raw):ApiResult<boolean>=>{const parsed=setTerminalSchedulePlanInputSchema.safeParse(raw);if(!parsed.success)return failure('Plano de horários inválido.');database.setTerminalSchedulePlan(parsed.data.terminalId,parsed.data.schedulePlanId);notifyDataChanged();return success(true);});
-  ipcMain.handle('terminal-control-rule:save',(_event,raw):ApiResult<TerminalControlRule>=>{const parsed=saveTerminalControlRuleInputSchema.safeParse(raw);if(!parsed.success)return failure(parsed.error.issues.map(issue=>issue.message).join(' '));const rule=database.saveTerminalControlRule(parsed.data);for(const terminal of database.listTerminals())if(terminal.controlPlayRuleIds.includes(rule.id)||terminal.controlPauseRuleIds.includes(rule.id))enqueueTerminalTree(terminal.id);notifyDataChanged();return success(rule);});
-  ipcMain.handle('terminal-control-rule:delete',(_event,raw):ApiResult<boolean>=>{const parsed=terminalControlRuleIdSchema.safeParse(raw);if(!parsed.success)return failure('Regra inválida.');const affected=database.listTerminals().filter(terminal=>terminal.controlPlayRuleIds.includes(parsed.data)||terminal.controlPauseRuleIds.includes(parsed.data)).map(terminal=>terminal.id);database.deleteTerminalControlRule(parsed.data);for(const terminalId of affected)enqueueTerminalTree(terminalId);notifyDataChanged();return success(true);});
+  ipcMain.handle('terminal:set-schedule-plan',(_event,raw):ApiResult<boolean>=>{const parsed=setTerminalSchedulePlanInputSchema.safeParse(raw);if(!parsed.success)return failure('Plano de horários inválido.');database.setTerminalSchedulePlan(parsed.data.terminalId,parsed.data.schedulePlanId);markTerminalTreePending(parsed.data.terminalId);notifyDataChanged();return success(true);});
+  ipcMain.handle('terminal-control-rule:save',(_event,raw):ApiResult<TerminalControlRule>=>{const parsed=saveTerminalControlRuleInputSchema.safeParse(raw);if(!parsed.success)return failure(parsed.error.issues.map(issue=>issue.message).join(' '));const rule=database.saveTerminalControlRule(parsed.data);for(const terminal of database.listTerminals())if(terminal.controlPlayRuleIds.includes(rule.id)||terminal.controlPauseRuleIds.includes(rule.id))markTerminalTreePending(terminal.id);notifyDataChanged();return success(rule);});
+  ipcMain.handle('terminal-control-rule:delete',(_event,raw):ApiResult<boolean>=>{const parsed=terminalControlRuleIdSchema.safeParse(raw);if(!parsed.success)return failure('Regra inválida.');const affected=database.listTerminals().filter(terminal=>terminal.controlPlayRuleIds.includes(parsed.data)||terminal.controlPauseRuleIds.includes(parsed.data)).map(terminal=>terminal.id);database.deleteTerminalControlRule(parsed.data);for(const terminalId of affected)markTerminalTreePending(terminalId);notifyDataChanged();return success(true);});
   ipcMain.handle('screen-profile:save', (_event, raw): ApiResult<ScreenProfile> => {
     const parsed = saveScreenProfileInputSchema.safeParse(raw);
     if (!parsed.success || !database.getTerminal(parsed.data.terminalId)) return failure('Configuração do bot inválida.');
@@ -344,14 +345,13 @@ function registerIpc() {
   });
   ipcMain.handle('terminal:delete', (_event, raw): ApiResult<boolean> => {
     const parsed = terminalIdSchema.safeParse(raw); if (!parsed.success) return failure('Terminal inválido.');
-    terminalUpdateStates.delete(parsed.data);terminalUpdateSnapshots.delete(parsed.data);foregroundTerminalIds.delete(parsed.data);terminalUpdateRerunIds.delete(parsed.data);terminalFullUpdateIds.delete(parsed.data);
-    for(let index=terminalUpdateQueue.length-1;index>=0;index--)if(terminalUpdateQueue[index]===parsed.data)terminalUpdateQueue.splice(index,1);
-    terminalManager.deleteTerminal(parsed.data); return success(true);
+    terminalUpdateStates.delete(parsed.data);terminalUpdateSnapshots.delete(parsed.data);terminalUpdateDirtyIds.delete(parsed.data);persistPendingTerminalUpdates();
+    terminalManager.deleteTerminal(parsed.data);notifyDataChanged();return success(true);
   });
   ipcMain.handle('terminal:reset',(_event,raw):ApiResult<boolean>=>{const parsed=resetTerminalInputSchema.safeParse(raw);if(!parsed.success)return failure('Opção de reset inválida.');try{terminalManager.resetTerminal(parsed.data.id,parsed.data.mode==='FULL');notifyDataChanged();return success(true);}catch(error){return failure(error instanceof Error?error.message:'Falha ao resetar Terminal.');}});
   ipcMain.handle('terminal:update-bankroll',(_event,raw):ApiResult<boolean>=>{const parsed=updateTerminalBankrollInputSchema.safeParse(raw);if(!parsed.success)return failure('Valor da banca inicial inválido.');try{terminalManager.updateTerminalInitialBankroll(parsed.data.id,parsed.data.initialBankrollCents);notifyDataChanged();return success(true);}catch(error){return failure(error instanceof Error?error.message:'Falha ao atualizar banca inicial.');}});
   ipcMain.handle('terminal:history',(_event,raw)=>{const parsed=terminalHistoryQuerySchema.safeParse(raw);return parsed.success?success(database.getTerminalHistory(parsed.data.terminalId,parsed.data.limit)):failure('Filtro de histórico inválido.');});
-  ipcMain.handle('terminal:set-bankroll-anchor',(_event,raw):ApiResult<boolean>=>{const parsed=setTerminalBankrollAnchorInputSchema.safeParse(raw);if(!parsed.success)return failure('Bolinha ou valor da banca inicial inválido.');try{if(!database.getTerminal(parsed.data.id))return failure('Terminal não encontrado.');database.setTerminalBankrollAnchor(parsed.data.id,parsed.data.initialBankrollCents,parsed.data.bankrollStartAt);enqueueTerminalTree(parsed.data.id,true,false);notifyDataChanged();return success(true);}catch(error){return failure(error instanceof Error?error.message:'Falha ao definir o início da banca.');}});
+  ipcMain.handle('terminal:set-bankroll-anchor',(_event,raw):ApiResult<boolean>=>{const parsed=setTerminalBankrollAnchorInputSchema.safeParse(raw);if(!parsed.success)return failure('Bolinha ou valor da banca inicial inválido.');try{if(!database.getTerminal(parsed.data.id))return failure('Terminal não encontrado.');database.setTerminalBankrollAnchor(parsed.data.id,parsed.data.initialBankrollCents,parsed.data.bankrollStartAt);markTerminalTreePending(parsed.data.id);notifyDataChanged();return success(true);}catch(error){return failure(error instanceof Error?error.message:'Falha ao definir o início da banca.');}});
   ipcMain.handle('platform:create', (_event, raw): ApiResult<Platform> => {
     const parsed = createPlatformInputSchema.safeParse(raw);
     if (!parsed.success) return failure('Configuração da plataforma inválida.');
@@ -465,7 +465,18 @@ function registerIpc() {
     catch(error) { return failure(error instanceof Error ? error.message : 'Falha ao importar workspace.'); }
   });
   ipcMain.handle('configuration:list', (_event, raw): ApiResult<ConfigurationDocument[]> => { const kinds:ConfigurationKind[]=['GAME_STRATEGY','BET_STRATEGY','BET_PLAN','SCHEDULE_PLAN']; const kind=raw?.kind as ConfigurationKind|undefined; return kind&&!kinds.includes(kind)?failure('Tipo de configuração inválido.'):success(database.listConfigurationDocuments(kind)); });
-  ipcMain.handle('configuration:save', (_event, raw): ApiResult<ConfigurationDocument> => { const parsed=saveConfigurationSchema.safeParse(raw);if(!parsed.success)return failure(parsed.error.issues.map(issue=>`${issue.path.join('.')||'configuração'}: ${issue.message}`).join(' '));const document=database.saveConfiguration(parsed.data);if(parsed.data.id&&parsed.data.kind!=='SCHEDULE_PLAN'&&parsed.data.kind!=='BET_PLAN')for(const terminal of database.listTerminals().filter(item=>terminalUsesConfiguration(item,document.id,document.kind)))enqueueTerminalTree(terminal.id,false,false);notifyDataChanged();return success(document); });
+  ipcMain.handle('configuration:save', (_event, raw): ApiResult<ConfigurationDocument> => {
+    const parsed=saveConfigurationSchema.safeParse(raw);
+    if(!parsed.success)return failure(parsed.error.issues.map(issue=>`${issue.path.join('.')||'configuração'}: ${issue.message}`).join(' '));
+    try{
+      const document=database.saveConfiguration(parsed.data);
+      if(parsed.data.id&&parsed.data.kind!=='SCHEDULE_PLAN')for(const terminal of database.listTerminals().filter(item=>terminalUsesConfiguration(item,document.id,document.kind)))markTerminalTreePending(terminal.id);
+      notifyDataChanged();
+      return success(document);
+    }catch(error){
+      return failure(error instanceof Error?error.message:'Não foi possível salvar a configuração.');
+    }
+  });
   ipcMain.handle('configuration:duplicate', (_event, raw): ApiResult<ConfigurationDocument> => {const parsed=configurationActionSchema.safeParse(raw);if(!parsed.success)return failure('Configuração inválida.');const copy=database.duplicateConfiguration(parsed.data.id,parsed.data.kind);if(!copy)return failure('Configuração não encontrada.');notifyDataChanged();return success(copy);});
   ipcMain.handle('configuration:delete', (_event, raw): ApiResult<boolean> => {const parsed=configurationActionSchema.safeParse(raw);if(!parsed.success)return failure('Configuração inválida.');try{database.deleteConfiguration(parsed.data.id,parsed.data.kind);notifyDataChanged();return success(true);}catch(error){return failure(error instanceof Error?error.message:'Não foi possível excluir.');}});
   ipcMain.handle('app:restart', () => { screenAutomation.setPaused(true); app.relaunch(); app.exit(0); return true; });
@@ -476,9 +487,9 @@ function registerIpc() {
 
 function notifyDataChanged() { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:data-changed'); }
 
-function getTerminalHistoryDisplayMax(){return Math.max(10,Math.min(500,database.getAppSetting<number>('terminal_history_display_max')??200));}
+function getTerminalHistoryDisplayMax(){return Math.max(10,Math.min(5_000,database.getAppSetting<number>('terminal_history_display_max')??5_000));}
 
-const TERMINAL_HISTORY_SIGNAL_LIMIT=500;
+const TERMINAL_HISTORY_SIGNAL_LIMIT=5_000;
 
 function buildBootstrapData():BootstrapData{
   const base=database.bootstrap();const terminals=base.terminals.map(terminal=>terminalUpdateSnapshots.get(terminal.id)?.terminal??terminal);const liveRuntimes=terminalManager.getRuntimes();
@@ -487,33 +498,52 @@ function buildBootstrapData():BootstrapData{
   return{...base,terminals,terminalRuntimes,terminalHistories,terminalUpdateStates:Object.fromEntries(terminalUpdateStates),collectors:collectorManager.snapshots(),eventBus:roundEventBus.snapshot()};
 }
 
-function terminalTreeRoot(terminalId:string){let current=database.getTerminal(terminalId);const visited=new Set<string>();while(current?.strategySourceTerminalId&&!visited.has(current.id)){visited.add(current.id);const source=database.getTerminal(current.strategySourceTerminalId);if(!source)break;current=source;}return current?.id??terminalId;}
-
 function collectTerminalTree(terminalId:string,visited=new Set<string>(),result:string[]=[]){if(visited.has(terminalId)||!database.getTerminal(terminalId))return result;visited.add(terminalId);result.push(terminalId);for(const dependent of database.listTerminals().filter(item=>item.strategySourceTerminalId===terminalId))collectTerminalTree(dependent.id,visited,result);return result;}
 
-function enqueueTerminalTree(terminalId:string,foreground=false,includeSources=true,full=true){
-  const ids=collectTerminalTree(includeSources?terminalTreeRoot(terminalId):terminalId);const now=new Date().toISOString();
-  for(const id of ids){
-    if(full)terminalFullUpdateIds.add(id);
-    if(!terminalUpdateSnapshots.has(id)){const terminal=database.getTerminal(id);if(terminal)terminalUpdateSnapshots.set(id,{terminal:{...terminal},runtime:terminalManager.getRuntime(id),history:database.getTerminalHistory(id,getTerminalHistoryDisplayMax())});}
-    if(foreground)foregroundTerminalIds.add(id);const active=terminalUpdateStates.get(id)?.status;
-    if(active==='BACKGROUND'||active==='FOREGROUND'){if(foreground){terminalUpdateStates.set(id,{terminalId:id,status:'FOREGROUND',progress:terminalUpdateStates.get(id)?.progress??0,error:null,updatedAt:now});if(id!==terminalId)terminalUpdateRerunIds.add(id);}else terminalUpdateRerunIds.add(id);continue;}
-    const existingIndex=terminalUpdateQueue.indexOf(id);if(existingIndex>=0)terminalUpdateQueue.splice(existingIndex,1);terminalUpdateStates.set(id,{terminalId:id,status:'PENDING',progress:0,error:null,updatedAt:now});
+function terminalDependencyChain(terminalId:string){
+  const result:string[]=[];const visited=new Set<string>();let current=database.getTerminal(terminalId);
+  while(current&&!visited.has(current.id)){visited.add(current.id);result.unshift(current.id);current=current.strategySourceTerminalId?database.getTerminal(current.strategySourceTerminalId):null;}
+  return result;
+}
+
+function hydratePendingTerminalUpdates(){
+  const saved=database.getAppSetting<Record<string,{updatedAt?:string}>>(TERMINAL_PENDING_UPDATES_SETTING)??{};
+  for(const[id,value]of Object.entries(saved))if(database.getTerminal(id))terminalUpdateStates.set(id,{terminalId:id,status:'PENDING',progress:0,error:null,updatedAt:value.updatedAt??new Date().toISOString()});
+}
+
+function persistPendingTerminalUpdates(){
+  const pending=Object.fromEntries([...terminalUpdateStates].filter(([,state])=>state.status==='PENDING'||state.status==='FOREGROUND'||state.status==='ERROR').map(([id,state])=>[id,{updatedAt:state.updatedAt}]));
+  database.setAppSetting(TERMINAL_PENDING_UPDATES_SETTING,pending);
+}
+
+function markTerminalTreePending(terminalId:string){
+  const now=new Date().toISOString();
+  for(const id of collectTerminalTree(terminalId)){
+    if(terminalUpdateStates.get(id)?.status==='FOREGROUND'){terminalUpdateDirtyIds.add(id);continue;}
+    terminalUpdateStates.set(id,{terminalId:id,status:'PENDING',progress:0,error:null,updatedAt:now});terminalManager.requireConfigurationUpdate(id);
   }
-  const queued=ids.filter(id=>!terminalUpdateQueue.includes(id));if(foreground)terminalUpdateQueue.unshift(...queued);else terminalUpdateQueue.push(...queued);notifyDataChanged();void runTerminalUpdateQueue();
+  persistPendingTerminalUpdates();notifyDataChanged();
 }
 
-async function runTerminalUpdateQueue(){
-  if(terminalUpdateQueueRunning)return;terminalUpdateQueueRunning=true;
-  try{while(terminalUpdateQueue.length){
-    const terminalId=terminalUpdateQueue.shift()!;if(!database.getTerminal(terminalId))continue;const foreground=foregroundTerminalIds.delete(terminalId);const full=terminalFullUpdateIds.delete(terminalId);let lastNotified=-10;
-    terminalUpdateStates.set(terminalId,{terminalId,status:foreground?'FOREGROUND':'BACKGROUND',progress:0,error:null,updatedAt:new Date().toISOString()});notifyDataChanged();
-    try{await preloadTerminalHistoryChunked(terminalId,progress=>{const currentForeground=terminalUpdateStates.get(terminalId)?.status==='FOREGROUND';terminalUpdateStates.set(terminalId,{terminalId,status:currentForeground?'FOREGROUND':'BACKGROUND',progress,error:null,updatedAt:new Date().toISOString()});if(progress-lastNotified>=10||progress===100){lastNotified=progress;notifyDataChanged();}},full);if(terminalUpdateRerunIds.delete(terminalId)){terminalUpdateStates.set(terminalId,{terminalId,status:'PENDING',progress:0,error:null,updatedAt:new Date().toISOString()});terminalUpdateQueue.push(terminalId);}else{terminalUpdateStates.set(terminalId,{terminalId,status:'UPDATED',progress:100,error:null,updatedAt:new Date().toISOString()});terminalUpdateSnapshots.delete(terminalId);}notifyDataChanged();}
-    catch(error){const message=error instanceof Error?error.message:String(error);terminalUpdateStates.set(terminalId,{terminalId,status:'ERROR',progress:0,error:message,updatedAt:new Date().toISOString()});database.logEvent('TERMINAL','ERROR','TERMINAL_HISTORY_PRELOAD_FAILED',{terminalId,error:message});notifyDataChanged();}
-  }}finally{terminalUpdateQueueRunning=false;}
+async function updateTerminalDependencyChain(terminalId:string){
+  if(terminalUpdateRunning)throw new Error('Já existe uma atualização manual em andamento. Aguarde a conclusão.');
+  terminalUpdateRunning=true;
+  try{
+    for(const id of terminalDependencyChain(terminalId)){
+      const terminal=database.getTerminal(id);if(!terminal)throw new Error('Um Terminal de origem não foi encontrado.');
+      terminalUpdateSnapshots.set(id,{terminal:{...terminal},runtime:terminalManager.getRuntime(id),history:database.getTerminalHistory(id,getTerminalHistoryDisplayMax())});
+      let lastNotified=-10;terminalUpdateStates.set(id,{terminalId:id,status:'FOREGROUND',progress:0,error:null,updatedAt:new Date().toISOString()});persistPendingTerminalUpdates();notifyDataChanged();
+      try{
+        await preloadTerminalHistoryChunked(id,progress=>{terminalUpdateStates.set(id,{terminalId:id,status:'FOREGROUND',progress,error:null,updatedAt:new Date().toISOString()});if(progress-lastNotified>=10||progress===100){lastNotified=progress;notifyDataChanged();}},true);
+        if(terminalUpdateDirtyIds.delete(id)){terminalUpdateStates.set(id,{terminalId:id,status:'PENDING',progress:0,error:null,updatedAt:new Date().toISOString()});terminalManager.requireConfigurationUpdate(id);}
+        else terminalUpdateStates.set(id,{terminalId:id,status:'UPDATED',progress:100,error:null,updatedAt:new Date().toISOString()});
+        terminalUpdateSnapshots.delete(id);persistPendingTerminalUpdates();notifyDataChanged();
+      }catch(error){const message=error instanceof Error?error.message:String(error);terminalUpdateStates.set(id,{terminalId:id,status:'ERROR',progress:0,error:message,updatedAt:new Date().toISOString()});terminalUpdateSnapshots.delete(id);persistPendingTerminalUpdates();database.logEvent('TERMINAL','ERROR','TERMINAL_HISTORY_PRELOAD_FAILED',{terminalId:id,error:message});notifyDataChanged();throw error;}
+    }
+  }finally{terminalUpdateRunning=false;}
 }
 
-function effectiveAnalysisRoundLimit(terminalId:string){return Math.max(...collectTerminalTree(terminalId).map(id=>database.getTerminal(id)?.analysisRoundLimit??0),database.getTerminal(terminalId)?.analysisRoundLimit??1_000);}
+function effectiveAnalysisRoundLimit(terminalId:string){return Math.max(...terminalDependencyChain(terminalId).map(id=>database.getTerminal(id)?.analysisRoundLimit??0),database.getTerminal(terminalId)?.analysisRoundLimit??5_000);}
 
 function mergedTerminalRounds(terminal:Terminal){const limit=effectiveAnalysisRoundLimit(terminal.id);const operationalRounds=database.getBacktestRounds(terminal.platformId,limit);const archivedRounds=archiveDatabase.getRounds(terminal.platformId,limit,true);return[...new Map([...archivedRounds,...operationalRounds].map(round=>[round.dedupKey,round])).values()].sort((left,right)=>left.occurredAt.localeCompare(right.occurredAt)).slice(-limit);}
 
@@ -526,15 +556,15 @@ async function preloadTerminalHistoryChunked(terminalId:string,onProgress:(progr
 }
 
 function terminalAnalysisConfigurationChanged(previous:Terminal,current:Terminal){
-  return previous.platformId!==current.platformId||previous.gameStrategyId!==current.gameStrategyId||previous.strategySourceTerminalId!==current.strategySourceTerminalId||previous.strategySourceMode!==current.strategySourceMode||previous.betStrategyWinId!==current.betStrategyWinId||previous.betStrategyLossId!==current.betStrategyLossId||previous.betPlanWinId!==current.betPlanWinId||previous.betPlanLossId!==current.betPlanLossId||previous.analysisRoundLimit!==current.analysisRoundLimit||JSON.stringify(previous.entryBlockPatterns)!==JSON.stringify(current.entryBlockPatterns)||JSON.stringify(previous.operationCombinations)!==JSON.stringify(current.operationCombinations)||!sameIds(previous.controlPlayRuleIds,current.controlPlayRuleIds)||!sameIds(previous.controlPauseRuleIds,current.controlPauseRuleIds);
+  return previous.platformId!==current.platformId||previous.gameStrategyId!==current.gameStrategyId||previous.strategySourceTerminalId!==current.strategySourceTerminalId||previous.strategySourceMode!==current.strategySourceMode||previous.betStrategyId!==current.betStrategyId||previous.betStrategyWinId!==current.betStrategyWinId||previous.betStrategyLossId!==current.betStrategyLossId||previous.betPlanId!==current.betPlanId||previous.betPlanWinId!==current.betPlanWinId||previous.betPlanLossId!==current.betPlanLossId||previous.analysisRoundLimit!==current.analysisRoundLimit||previous.bankrollStartAt!==current.bankrollStartAt||JSON.stringify(previous.entryBlockPatterns)!==JSON.stringify(current.entryBlockPatterns)||JSON.stringify(previous.operationCombinations)!==JSON.stringify(current.operationCombinations)||!sameIds(previous.controlPlayRuleIds,current.controlPlayRuleIds)||!sameIds(previous.controlPauseRuleIds,current.controlPauseRuleIds);
 }
 
 function sameIds(left:string[],right:string[]){const sortedLeft=[...left].sort();const sortedRight=[...right].sort();return sortedLeft.length===sortedRight.length&&sortedLeft.every((id,index)=>id===sortedRight[index]);}
 
 function terminalUsesConfiguration(terminal:Terminal,configurationId:string,kind:ConfigurationKind){
   if(kind==='GAME_STRATEGY')return terminal.gameStrategyId===configurationId;
-  if(kind==='BET_STRATEGY')return terminal.betStrategyWinId===configurationId||terminal.betStrategyLossId===configurationId||terminal.operationCombinations.some(item=>item.betStrategyId===configurationId||item.lossReentryBetStrategyId===configurationId);
-  if(kind==='BET_PLAN')return terminal.betPlanWinId===configurationId||terminal.betPlanLossId===configurationId||terminal.operationCombinations.some(item=>item.betPlanId===configurationId);
+  if(kind==='BET_STRATEGY')return terminal.betStrategyId===configurationId||terminal.betStrategyWinId===configurationId||terminal.betStrategyLossId===configurationId||terminal.operationCombinations.some(item=>item.betStrategyId===configurationId||item.lossReentryBetStrategyId===configurationId);
+  if(kind==='BET_PLAN')return terminal.betPlanId===configurationId||terminal.betPlanWinId===configurationId||terminal.betPlanLossId===configurationId||terminal.operationCombinations.some(item=>item.betPlanId===configurationId);
   return false;
 }
 

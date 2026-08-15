@@ -12,7 +12,7 @@ describe('Terminal presets',()=>{
     const directory=await mkdtemp(path.join(os.tmpdir(),'aviator-terminal-preset-'));directories.push(directory);
     process.env.AVIATOR_MASTER_EMAIL='preset-test@local.test';process.env.AVIATOR_MASTER_PASSWORD='preset-test-password';
     const database=new AppDatabase(path.join(directory,'app.db'));
-    expect(database.bootstrap().terminalHistoryDisplayMax).toBe(200);
+    expect(database.bootstrap().terminalHistoryDisplayMax).toBe(5_000);
     const terminal=database.listTerminals()[0];
     terminal.historyDisplayLimit=100;terminal.analysisRoundLimit=5_000;terminal.operationCombinations=[{id:'sequence-ai',name:'IA até LOSS',priority:10,enabled:true,triggerType:'SEQUENCE_AI',pattern:null,sequenceAiConfig:{minWindow:2,maxWindow:12,minOccurrences:20,minConfidence:62},betStrategyId:terminal.betStrategyWinId,lossReentryType:'IMMEDIATE',lossReentryPattern:null,lossReentryBetStrategyId:null,betPlanId:terminal.betPlanWinId,behavior:'REPEAT_UNTIL_LOSS'}];database.updateTerminal(terminal);
     const originalGame=database.listConfigurationDocuments('GAME_STRATEGY').find(item=>item.id===terminal.gameStrategyId)!;
@@ -32,6 +32,18 @@ describe('Terminal presets',()=>{
     expect(restored.draft.operationCombinations?.[0]).toMatchObject({id:'sequence-ai',name:'IA até LOSS',triggerType:'SEQUENCE_AI',sequenceAiConfig:{maxWindow:12,minConfidence:62},behavior:'REPEAT_UNTIL_LOSS'});
     expect(restored.draft.operationCombinations?.[0].betStrategyId).not.toBe(terminal.betStrategyWinId);
     expect(restored.draft.operationCombinations?.[0].betPlanId).not.toBe(terminal.betPlanWinId);
+    database.close();
+  });
+
+  it('persiste o banco de padrões sem duplicar a mesma observação',async()=>{
+    const directory=await mkdtemp(path.join(os.tmpdir(),'aviator-pattern-bank-'));directories.push(directory);
+    process.env.AVIATOR_MASTER_EMAIL='pattern-test@local.test';process.env.AVIATOR_MASTER_PASSWORD='pattern-test-password';
+    const database=new AppDatabase(path.join(directory,'app.db'));const terminal=database.listTerminals()[0];const datasetKey=`${terminal.id}:test:pattern-v2.1`;
+    const input={datasetKey,sourceTerminalId:terminal.id,modelVersion:'pattern-v2.1',signalDefinition:'test',sourceSignalId:'signal-1',result:'WIN' as const,contexts:['L','WL'],occurredAt:'2026-08-14T12:00:00.000Z'};
+    expect(database.recordSequencePatternObservation(input)).toBe(1);expect(database.recordSequencePatternObservation(input)).toBe(1);
+    expect(database.getSequencePatternModel(datasetKey)).toMatchObject({history:'W',observations:1,transitions:{L:{wins:1,losses:0},WL:{wins:1,losses:0}},datasetKey,persistedObservations:1});
+    expect(database.replaceSequencePatternModel({datasetKey,sourceTerminalId:terminal.id,modelVersion:'pattern-v2.1',signalDefinition:'test',runtime:{history:'',observations:0,transitions:{},lastPrediction:null},observedAt:'2026-08-14T12:01:00.000Z'})).toBe(1);
+    expect(database.getSequencePatternModel(datasetKey)?.observations).toBe(1);
     database.close();
   });
 });

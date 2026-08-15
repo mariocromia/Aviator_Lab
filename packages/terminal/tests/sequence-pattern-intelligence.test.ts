@@ -60,4 +60,23 @@ describe('inteligência de padrões sequenciais',()=>{
     expect(prediction.expected).toBe('W');expect(prediction.fullCycleLossRisk).toBeGreaterThan(5);
     expect(prediction.shouldEnter).toBe(false);expect(prediction.riskBlocked).toBe(true);
   });
+
+  it('a v2 combina contextos e libera somente um W com evidência conservadora',()=>{
+    const runtime={...createSequenceAiRuntime(),history:'WWLWLW',observations:2_000,transitions:{LW:{wins:90,losses:30},WLW:{wins:70,losses:20},LWLW:{wins:50,losses:10}}};
+    const prediction=predictSequence(runtime,{engineVersion:'V2',minWindow:2,maxWindow:4,minOccurrences:10,minConfidence:58,minProbabilityLowerBound:50,maxCurrentLossStreak:0,minContextAgreement:60,maxFullCycleLossRisk:100,minRecentOccurrences:0,maxRecentDivergence:100},3);
+    expect(prediction).toMatchObject({engineVersion:'V2',expected:'W',shouldEnter:true,riskBlocked:false,modelVersion:'pattern-v2.1'});
+    expect(prediction.probabilityLowerBound).toBeGreaterThan(50);
+  });
+
+  it('a v2 bloqueia quando o período recente diverge do banco histórico',()=>{
+    const runtime={...createSequenceAiRuntime(),history:`${'WLL'.repeat(30)}WL`,observations:3_000,transitions:{WL:{wins:80,losses:20}}};
+    const prediction=predictSequence(runtime,{engineVersion:'V2',minWindow:2,maxWindow:2,minOccurrences:20,minConfidence:58,minProbabilityLowerBound:0,maxCurrentLossStreak:0,minContextAgreement:0,maxFullCycleLossRisk:100,recentWindow:500,minRecentOccurrences:8,maxRecentDivergence:12},3);
+    expect(prediction.expected).toBe('W');expect(prediction.shouldEnter).toBe(false);expect(prediction.regimeStable).toBe(false);expect(prediction.reason).toContain('regime recente divergente');
+  });
+
+  it('a v2 rejeita porcentagem alta baseada em amostra estatisticamente frágil',()=>{
+    const runtime={...createSequenceAiRuntime(),history:'WL',observations:100,transitions:{WL:{wins:7,losses:3}}};
+    const prediction=predictSequence(runtime,{engineVersion:'V2',minWindow:2,maxWindow:2,minOccurrences:10,minConfidence:60,minProbabilityLowerBound:55,maxCurrentLossStreak:0,minContextAgreement:0,maxFullCycleLossRisk:100,minRecentOccurrences:0,maxRecentDivergence:100},2);
+    expect(prediction.expected).toBe('W');expect(prediction.shouldEnter).toBe(false);expect(prediction.probabilityLowerBound).toBeLessThan(55);expect(prediction.reason).toContain('limite conservador');
+  });
 });

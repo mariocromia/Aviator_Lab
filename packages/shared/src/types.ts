@@ -406,6 +406,8 @@ export interface TerminalOperationCombination {
 }
 
 export interface SequenceAiConfig {
+  /** V1 preserva o algoritmo legado; V2 usa o banco de padroes e filtros de estabilidade. */
+  engineVersion?: 'V1' | 'V2';
   minWindow: number;
   maxWindow: number;
   minOccurrences: number;
@@ -416,9 +418,19 @@ export interface SequenceAiConfig {
   minContextAgreement?: number;
   /** Risco maximo aceito de perder todas as etapas BASE/Gales. Zero desativa. */
   maxFullCycleLossRisk?: number;
+  /** Limite inferior conservador da probabilidade de W (Wilson). */
+  minProbabilityLowerBound?: number;
+  /** Quantidade de sinais recentes usada somente para detectar mudanca de regime. */
+  recentWindow?: number;
+  /** Amostra recente minima antes de aplicar o filtro de divergencia. */
+  minRecentOccurrences?: number;
+  /** Diferenca maxima, em pontos percentuais, entre historico global e recente. */
+  maxRecentDivergence?: number;
 }
 
 export interface SequenceAiPrediction {
+  engineVersion?: 'V1' | 'V2';
+  modelVersion?: string;
   expected: 'W' | 'L' | null;
   shouldEnter: boolean;
   winProbability: number;
@@ -434,6 +446,12 @@ export interface SequenceAiPrediction {
   fullCycleLossRisk?: number;
   riskDepth?: number;
   riskBlocked?: boolean;
+  probabilityLowerBound?: number;
+  recentWinProbability?: number;
+  recentSampleSize?: number;
+  recentDivergence?: number;
+  regimeStable?: boolean;
+  structuralPattern?: string | null;
   reason: string;
 }
 
@@ -442,6 +460,9 @@ export interface SequenceAiRuntime {
   observations: number;
   transitions: Record<string,{wins:number;losses:number}>;
   lastPrediction: SequenceAiPrediction | null;
+  /** Identifica o banco persistente que já foi incorporado ao runtime. */
+  datasetKey?: string | null;
+  persistedObservations?: number;
 }
 
 export interface StrategyOption { id: string; name: string; sortOrder: number; }
@@ -510,7 +531,7 @@ export interface RoundEventBusSnapshot {
 
 export interface TerminalUpdateState {
   terminalId: string;
-  status: 'PENDING' | 'BACKGROUND' | 'FOREGROUND' | 'ERROR' | 'UPDATED';
+  status: 'PENDING' | 'FOREGROUND' | 'ERROR' | 'UPDATED';
   progress: number;
   error: string | null;
   updatedAt: string;
