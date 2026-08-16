@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, screen, Tray, type Display } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, powerMonitor, screen, Tray, type Display } from 'electron';
 import path from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -19,6 +19,8 @@ import { ArchiveDatabase } from './archive-database.js';
 import { ArchiveSyncService } from './archive-sync-service.js';
 
 let mainWindow: BrowserWindow | null = null;
+let betSimulatorWindow: BrowserWindow | null = null;
+const transientBetSimulatorProfiles=new Map<string,ScreenProfile>();
 let splashWindow: BrowserWindow | null = null;
 let splashStartedAt = 0;
 let splashState = { message: 'Preparando o ambiente...', progress: 8, isError: false };
@@ -33,6 +35,14 @@ let archiveSync: ArchiveSyncService;
 let tray: Tray | null = null;
 let isQuitting = false;
 let archivePublishTimer: ReturnType<typeof setInterval> | null = null;
+let inactivityMonitorTimer: ReturnType<typeof setInterval> | null = null;
+let inactivityCheckRunning = false;
+const inactivityTriggeredTerminals = new Set<string>();
+type BetSimulatorLaunch={platformId:string|null;terminalId:string|null;terminalName:string|null;bankrollCents:number};
+const BET_SIMULATOR_TITLE='Aviator Lab • Simulador de Plataforma';
+type AssistedPreparationRequest={terminalId:string;deliveryMode:'LIVE'|'BACKLOG';stageIndex:number;betPlanId:string;amountsCents:number[]};
+const pendingAssistedPreparations=new Map<string,AssistedPreparationRequest>();
+const assistedPreparationsInFlight=new Set<string>();
 const INTERFACE_SCALES = new Set([0.8, 0.9, 1, 1.1, 1.25]);
 const terminalUpdateStates=new Map<string,TerminalUpdateState>();
 const terminalUpdateSnapshots=new Map<string,{terminal:Terminal;runtime:TerminalRuntime|null;history:TerminalHistoryItem[]}>();
@@ -113,6 +123,97 @@ function createWindow() {
   void load.catch(error => updateSplash(`Falha ao carregar a interface: ${error instanceof Error ? error.message : String(error)}`, 100, true));
 }
 
+function betSimulatorLaunch(terminalId?:string):BetSimulatorLaunch {
+  const terminal=terminalId?database.getTerminal(terminalId):null;
+  const fallbackPlatform=database.getPlatforms().find(platform=>platform.enabled)??database.getPlatforms()[0];
+  return {
+    platformId:terminal?.platformId??fallbackPlatform?.id??null,
+    terminalId:terminal?.id??null,
+    terminalName:terminal?.name??null,
+    bankrollCents:Math.max(100,terminal?.currentBankrollCents??10_000)
+  };
+}
+
+function createBetSimulatorWindow(terminalId?:string) {
+  const launch=betSimulatorLaunch(terminalId);
+  if(betSimulatorWindow&&!betSimulatorWindow.isDestroyed()){
+    disconnectBetSimulatorProfiles();
+    betSimulatorWindow.webContents.send('bet-simulator:configure',launch);
+    betSimulatorWindow.show();betSimulatorWindow.focus();return;
+  }
+  betSimulatorWindow=new BrowserWindow({
+    width:1020,height:720,minWidth:880,minHeight:620,frame:false,show:false,alwaysOnTop:true,
+    backgroundColor:'#070b10',title:BET_SIMULATOR_TITLE,
+    webPreferences:{
+      preload:path.join(import.meta.dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false
+    }
+  });
+  betSimulatorWindow.once('ready-to-show',()=>{betSimulatorWindow?.show();betSimulatorWindow?.focus();});
+  betSimulatorWindow.on('closed',()=>{disconnectBetSimulatorProfiles();betSimulatorWindow=null;});
+  const params=new URLSearchParams();
+  if(launch.platformId)params.set('platformId',launch.platformId);
+  if(launch.terminalId)params.set('terminalId',launch.terminalId);
+  if(launch.terminalName)params.set('terminalName',launch.terminalName);
+  params.set('bankrollCents',String(launch.bankrollCents));
+  const hash=`/bet-simulator?${params.toString()}`;
+  const devUrl=process.env.VITE_DEV_SERVER_URL;
+  const load=devUrl?betSimulatorWindow.loadURL(`${devUrl}#${hash}`):betSimulatorWindow.loadFile(path.join(import.meta.dirname,'../dist/index.html'),{hash});
+  void load.catch(error=>{database.logEvent('SYSTEM','ERROR','BET_SIMULATOR_LOAD_FAILED',{error:error instanceof Error?error.message:String(error)});betSimulatorWindow?.close();});
+}
+
+function disconnectBetSimulatorProfiles(){
+  for(const terminalId of transientBetSimulatorProfiles.keys())terminalManager?.setScreenControllerPaused(terminalId,true);
+  if(transientBetSimulatorProfiles.size)notifyDataChanged();
+  transientBetSimulatorProfiles.clear();
+}
+
+async function calibrateBetSimulator(terminalId:string):Promise<ApiResult<boolean>> {
+  const terminal=database.getTerminal(terminalId);
+  if(!terminal)return failure('Terminal não encontrado.');
+  if(terminal.mode!=='ASSISTED')return failure('Altere o Terminal para o modo ASSISTED antes de conectar o simulador.');
+  if(!betSimulatorWindow||betSimulatorWindow.isDestroyed())return failure('Abra a janela do simulador antes de calibrar.');
+  try{
+    const coordinates=await betSimulatorWindow.webContents.executeJavaScript(`(()=>{const keys=['bet1.amount','bet1.cashout','bet1.action','bet2.amount','bet2.cashout','bet2.action'];return Object.fromEntries(keys.map(key=>{const element=document.querySelector('[data-coordinate="'+key+'"]');if(!element)throw new Error('Campo '+key+' não encontrado.');const rect=element.getBoundingClientRect();return[key,{x:rect.left+rect.width/2,y:rect.top+rect.height/2}]}))})()`,true) as Record<string,{x:number;y:number}>;
+    const bounds=betSimulatorWindow.getContentBounds();
+    const absolute=Object.fromEntries(Object.entries(coordinates).map(([key,point])=>[key,{x:Math.round(bounds.x+point.x),y:Math.round(bounds.y+point.y)}])) as Record<string,{x:number;y:number}>;
+    const reference=absolute['bet1.amount'];
+    if(!reference||Object.values(absolute).some(point=>!Number.isFinite(point.x)||!Number.isFinite(point.y)))return failure('Não foi possível medir os campos do simulador.');
+    const display=screen.getDisplayNearestPoint(reference);
+    if(Object.values(absolute).some(point=>screen.getDisplayNearestPoint(point).id!==display.id))return failure('Mova toda a janela do simulador para um único monitor e tente novamente.');
+    const relative=(key:string)=>({x:absolute[key].x-display.bounds.x,y:absolute[key].y-display.bounds.y});
+    const existing=database.getScreenProfiles().find(profile=>profile.terminalId===terminalId);
+    const now=new Date().toISOString();
+    const profile:ScreenProfile={
+      id:`simulator-${terminalId}`,terminalId,name:`${terminal.name} • Simulador temporário`,resolutionWidth:display.size.width,resolutionHeight:display.size.height,
+      windowTitle:BET_SIMULATOR_TITLE,monitorIndex:Math.max(0,screen.getAllDisplays().findIndex(item=>item.id===display.id)),calibratedAt:now,
+      bet1:{enabled:existing?.bet1.enabled??true,amountCents:existing?.bet1.amountCents??100,cashout:existing?.bet1.cashout??10,amount:relative('bet1.amount'),cashoutField:relative('bet1.cashout'),action:relative('bet1.action')},
+      bet2:{enabled:existing?.bet2.enabled??true,amountCents:existing?.bet2.amountCents??100,cashout:existing?.bet2.cashout??10,amount:relative('bet2.amount'),cashoutField:relative('bet2.cashout'),action:relative('bet2.action')},
+      inactivityBet:existing?.inactivityBet,updatedAt:now
+    };
+    disconnectBetSimulatorProfiles();transientBetSimulatorProfiles.set(terminalId,profile);
+    if(screenAutomation.isPaused()){screenAutomation.setPaused(false);for(const item of database.listTerminals())terminalManager.setScreenControllerPaused(item.id,true);}
+    if(!terminalManager.setScreenControllerPaused(terminalId,false)){transientBetSimulatorProfiles.delete(terminalId);return failure('Runtime do Terminal não encontrado.');}
+    database.logEvent('SCREEN_CONTROLLER','INFO','SIMULATOR_PROFILE_CONNECTED',{terminalId,monitorIndex:profile.monitorIndex,resolutionWidth:profile.resolutionWidth,resolutionHeight:profile.resolutionHeight,temporary:true});resumePendingAssistedPreparation(terminalId);notifyDataChanged();return success(true);
+  }catch(error){return failure(error instanceof Error?error.message:'Não foi possível conectar o simulador.');}
+}
+
+async function testBetSimulator(terminalId:string):Promise<ApiResult<boolean>> {
+  if(!transientBetSimulatorProfiles.has(terminalId)){
+    const connected=await calibrateBetSimulator(terminalId);
+    if(!connected.ok)return connected;
+  }
+  const profile=transientBetSimulatorProfiles.get(terminalId);
+  if(!profile)return failure('O perfil temporário do simulador não está conectado.');
+  const display=screen.getAllDisplays()[profile.monitorIndex??0]??screen.getPrimaryDisplay();
+  const validation=validateScreenProfile(profile,{width:display.size.width,height:display.size.height});
+  if(!validation.valid)return failure(validation.issues.join(' '));
+  try{
+    const values={bet1:{amountCents:100,cashout:2}};
+    const result=await screenAutomation.prepare(profile,screenTransform(display),values,true);
+    database.logEvent('SCREEN_CONTROLLER','INFO','SIMULATOR_TEST_BET_EXECUTED',{...result,values});return success(true);
+  }catch(error){const message=error instanceof Error?error.message:String(error);database.logEvent('SCREEN_CONTROLLER','ERROR','SIMULATOR_TEST_BET_FAILED',{terminalId,error:message});return failure(message);}
+}
+
 function backgroundCollectorEnabled() { return database?.getAppSetting<boolean>('background_collector_enabled') ?? true; }
 
 function showMainWindow() {
@@ -147,6 +248,39 @@ function scheduleArchivePublishing() {
   }, 15 * 60_000);
 }
 
+function scheduleInactivityBetMonitoring() {
+  if (inactivityMonitorTimer) clearInterval(inactivityMonitorTimer);
+  inactivityMonitorTimer = setInterval(() => { void checkInactivityBets(); }, 5_000);
+}
+
+async function checkInactivityBets() {
+  if (inactivityCheckRunning || screenAutomation.isPaused()) return;
+  inactivityCheckRunning = true;
+  try {
+    const idleSeconds = powerMonitor.getSystemIdleTime();
+    for (const profile of database.getScreenProfiles()) {
+      const rule = profile.inactivityBet;
+      if (!rule?.enabled || !profile.bet2.enabled) { inactivityTriggeredTerminals.delete(profile.terminalId); continue; }
+      if (idleSeconds < rule.minutes * 60) { inactivityTriggeredTerminals.delete(profile.terminalId); continue; }
+      if (inactivityTriggeredTerminals.has(profile.terminalId)) continue;
+      const terminal = database.getTerminal(profile.terminalId);
+      if (!terminal || terminal.mode !== 'ASSISTED' || !terminal.enabled || terminal.paused) continue;
+      const display = screen.getAllDisplays()[profile.monitorIndex ?? 0] ?? screen.getPrimaryDisplay();
+      const validation = validateScreenProfile(profile, { width: display.size.width, height: display.size.height });
+      if (!validation.valid) { database.logEvent('SCREEN_CONTROLLER', 'WARN', 'INACTIVITY_BET_INVALID_PROFILE', { terminalId: terminal.id, issues: validation.issues }); continue; }
+      inactivityTriggeredTerminals.add(profile.terminalId);
+      try {
+        const values = { bet2: { amountCents: rule.amountCents, cashout: rule.cashout } };
+        const result = await screenAutomation.prepare(profile, screenTransform(display), values, true);
+        database.logEvent('SCREEN_CONTROLLER', 'INFO', 'INACTIVITY_BET_EXECUTED', { ...result, idleSeconds, values });
+      } catch (error) {
+        inactivityTriggeredTerminals.delete(profile.terminalId);
+        database.logEvent('SCREEN_CONTROLLER', 'ERROR', 'INACTIVITY_BET_FAILED', { terminalId: terminal.id, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+  } finally { inactivityCheckRunning = false; }
+}
+
 app.whenReady()
   .then(async () => {
     const backgroundLaunch = process.argv.includes('--background');
@@ -170,16 +304,8 @@ app.whenReady()
     terminalManager.initialize();
     for(const terminalId of terminalUpdateStates.keys())terminalManager.requireConfigurationUpdate(terminalId);
     screenAutomation = new ScreenAutomationService();
-    terminalManager.setAssistedPreparationHandler(async request => {
-      const terminal = database.getTerminal(request.terminalId); if (!terminal || request.deliveryMode !== 'LIVE' || terminal.mode !== 'ASSISTED' || !terminal.enabled || terminal.paused || screenAutomation.isPaused()) return;
-      const runtime = terminalManager.getRuntime(terminal.id); if (runtime?.screenControllerState.paused) return;
-      const profile = database.getScreenProfiles().find(item => item.terminalId === terminal.id); if (!profile) { database.logEvent('SCREEN_CONTROLLER', 'WARN', 'SCREEN_VALIDATION_FAILED', { terminalId: terminal.id, reason: 'PROFILE_MISSING' }); return; }
-      const display = screen.getAllDisplays()[profile.monitorIndex ?? 0] ?? screen.getPrimaryDisplay(); const validation = validateScreenProfile(profile, { width: display.size.width, height: display.size.height });
-      if (!validation.valid) { terminalManager.setScreenControllerState(terminal.id, 'INVALID'); database.logEvent('SCREEN_CONTROLLER', 'WARN', 'SCREEN_VALIDATION_FAILED', { terminalId: terminal.id, issues: validation.issues }); return; }
-      const stage = database.getBetPlanConfig(request.betPlanId)?.stages[request.stageIndex]; const values = stage ? { bet1: stage.legs[0] ? { amountCents: request.amountsCents[0]??stage.legs[0].amountCents, cashout: stage.legs[0].cashout } : undefined, bet2: stage.legs[1] ? { amountCents: request.amountsCents[1]??stage.legs[1].amountCents, cashout: stage.legs[1].cashout } : undefined } : undefined;
-      try { terminalManager.setScreenControllerState(terminal.id, 'PREPARING'); database.logEvent('SCREEN_CONTROLLER', 'INFO', 'SCREEN_PREPARE_STARTED', { terminalId: terminal.id, stageIndex: request.stageIndex }); const result = await screenAutomation.prepare(profile, screenTransform(display), values); terminalManager.setScreenControllerState(terminal.id, 'READY'); database.logEvent('SCREEN_CONTROLLER', 'INFO', 'SCREEN_PREPARE_FINISHED', result); }
-      catch (error) { terminalManager.setScreenControllerState(terminal.id, 'ERROR'); database.logEvent('SCREEN_CONTROLLER', 'ERROR', 'SCREEN_PREPARE_FAILED', { terminalId: terminal.id, error: error instanceof Error ? error.message : String(error) }); }
-    });
+    scheduleInactivityBetMonitoring();
+    terminalManager.setAssistedPreparationHandler(request => executeAssistedPreparation(request));
     globalShortcut.register('CommandOrControl+Shift+F12', () => { screenAutomation.setPaused(true); database.logEvent('SCREEN_CONTROLLER', 'WARN', 'SCREEN_EMERGENCY_STOP', {}); notifyDataChanged(); });
     collectorManager = new CollectorManager(
       net.fetch as unknown as import('@aviator/tipminer').FetchLike,
@@ -187,6 +313,7 @@ app.whenReady()
       archiveDatabase,
       notifyDataChanged,
       async round => {
+        if(betSimulatorWindow&&!betSimulatorWindow.isDestroyed())betSimulatorWindow.webContents.send('bet-simulator:round',round);
         const delivered = await terminalManager.routeRoundToTerminals(round);
         database.logEvent('COLLECTOR', 'INFO', 'ROUND_DISTRIBUTED', { platformId: round.platformId, roundId: round.id, delivered });
       }
@@ -201,7 +328,7 @@ app.whenReady()
     updateSplash('Carregando a interface...', 88);
     collectorManager.syncPlatforms(database.getPlatforms());
     console.info('[SYSTEM] Collectors started.');
-    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+    app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); });
   })
   .catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -215,7 +342,7 @@ app.whenReady()
   });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin' && !backgroundCollectorEnabled()) app.quit(); });
-app.on('before-quit', () => { isQuitting = true; screenAutomation?.setPaused(true); globalShortcut.unregisterAll(); collectorManager?.stopAll(); if (archivePublishTimer) clearInterval(archivePublishTimer); });
+app.on('before-quit', () => { isQuitting = true; screenAutomation?.setPaused(true); globalShortcut.unregisterAll(); collectorManager?.stopAll(); if (archivePublishTimer) clearInterval(archivePublishTimer); if (inactivityMonitorTimer) clearInterval(inactivityMonitorTimer); });
 
 function registerIpc() {
   ipcMain.handle('app:bootstrap', () => success(buildBootstrapData()));
@@ -278,13 +405,18 @@ function registerIpc() {
     if(!parsed.success||!database.getTerminal(parsed.data))return failure('Terminal não encontrado.');
     try{await updateTerminalDependencyChain(parsed.data);return success(true);}catch(error){return failure(error instanceof Error?error.message:'Falha ao atualizar o Terminal.');}
   });
-  ipcMain.handle('terminal:set-paused', (_event, raw): ApiResult<boolean> => {
+  ipcMain.handle('terminal:set-paused', async (_event, raw): Promise<ApiResult<boolean>> => {
     const parsed = terminalIdSchema.safeParse(raw?.id);
     if (!parsed.success || typeof raw?.paused !== 'boolean') return failure('Operação inválida.');
-    if(!raw.paused&&(terminalUpdateStates.get(parsed.data)?.status==='PENDING'||terminalUpdateStates.get(parsed.data)?.status==='ERROR'))return failure('Atualize o Terminal antes de retomá-lo.');
-    if (raw.paused) terminalManager.pauseTerminal(parsed.data); else if(!terminalManager.resumeTerminal(parsed.data)){const reason=terminalManager.getRuntime(parsed.data)?.pauseState.reason??'A banca não permite retomar este Terminal.';notifyDataChanged();return failure(reason);}
-    notifyDataChanged();
-    return success(true);
+    if(raw.paused){terminalManager.pauseTerminal(parsed.data);notifyDataChanged();return success(true);}
+    const updateState=terminalUpdateStates.get(parsed.data);
+    if(updateState?.status==='PENDING'||updateState?.status==='ERROR'){
+      database.logEvent('TERMINAL','INFO','TERMINAL_PLAY_AUTO_UPDATE_STARTED',{terminalId:parsed.data,previousStatus:updateState.status});
+      try{await updateTerminalDependencyChain(parsed.data);}catch(error){return failure(error instanceof Error?error.message:'Falha ao atualizar o Terminal antes do Play.');}
+      if(terminalUpdateStates.get(parsed.data)?.status==='PENDING')return failure('A configuração mudou novamente durante o recálculo. Clique em Play mais uma vez.');
+    }
+    if(!terminalManager.resumeTerminal(parsed.data)){const reason=terminalManager.getRuntime(parsed.data)?.pauseState.reason??'A banca não permite retomar este Terminal.';notifyDataChanged();return failure(reason);}
+    database.logEvent('TERMINAL','INFO','TERMINAL_PLAY_RESUMED',{terminalId:parsed.data});notifyDataChanged();return success(true);
   });
   ipcMain.handle('terminal:set-schedule-plan',(_event,raw):ApiResult<boolean>=>{const parsed=setTerminalSchedulePlanInputSchema.safeParse(raw);if(!parsed.success)return failure('Plano de horários inválido.');database.setTerminalSchedulePlan(parsed.data.terminalId,parsed.data.schedulePlanId);markTerminalTreePending(parsed.data.terminalId);notifyDataChanged();return success(true);});
   ipcMain.handle('terminal-control-rule:save',(_event,raw):ApiResult<TerminalControlRule>=>{const parsed=saveTerminalControlRuleInputSchema.safeParse(raw);if(!parsed.success)return failure(parsed.error.issues.map(issue=>issue.message).join(' '));const rule=database.saveTerminalControlRule(parsed.data);for(const terminal of database.listTerminals())if(terminal.controlPlayRuleIds.includes(rule.id)||terminal.controlPauseRuleIds.includes(rule.id))markTerminalTreePending(terminal.id);notifyDataChanged();return success(rule);});
@@ -321,14 +453,29 @@ function registerIpc() {
     if (typeof raw?.paused !== 'boolean') return failure('Estado de automação inválido.');
     screenAutomation.setPaused(raw.paused); database.logEvent('SCREEN_CONTROLLER', 'WARN', raw.paused ? 'SCREEN_CONTROLLER_PAUSED' : 'SCREEN_CONTROLLER_ENABLED', {}); notifyDataChanged(); return success(true);
   });
-  ipcMain.handle('screen-automation:test-coordinate', async (_event, raw): Promise<ApiResult<boolean>> => {
+  ipcMain.handle('screen-automation:set-terminal-enabled', (_event, raw): ApiResult<boolean> => {
+    const parsed = screenProfileActionSchema.safeParse(raw); if (!parsed.success || typeof raw?.enabled !== 'boolean') return failure('Terminal ou estado inválido.');
+    const terminal = database.getTerminal(parsed.data.terminalId);
+    if (!terminal) return failure('Terminal não encontrado.');
+    if (raw.enabled && terminal.mode !== 'ASSISTED') return failure('Altere o Terminal para o modo ASSISTED antes de ativar o mouse.');
+    if (raw.enabled && !database.getScreenProfiles().some(profile => profile.terminalId === terminal.id)) return failure('Configure o perfil de tela antes de ativar o mouse.');
+    if (raw.enabled && screenAutomation.isPaused()) {
+      screenAutomation.setPaused(false);
+      for (const item of database.listTerminals()) terminalManager.setScreenControllerPaused(item.id, true);
+    }
+    if (!terminalManager.setScreenControllerPaused(terminal.id, !raw.enabled)) return failure('Runtime do Terminal não encontrado.');
+    database.logEvent('SCREEN_CONTROLLER', 'WARN', raw.enabled ? 'TERMINAL_MOUSE_ENABLED' : 'TERMINAL_MOUSE_DISABLED', { terminalId: terminal.id });
+    if(raw.enabled)resumePendingAssistedPreparation(terminal.id);
+    notifyDataChanged(); return success(raw.enabled);
+  });  ipcMain.handle('screen-automation:test-coordinate', async (_event, raw): Promise<ApiResult<boolean>> => {
     const parsed = screenCoordinateTestSchema.safeParse(raw); if (!parsed.success) return failure('Coordenada de teste inválida.');
     const terminal = database.getTerminal(parsed.data.terminalId); const profile = database.getScreenProfiles().find(item => item.terminalId === parsed.data.terminalId);
     if (!terminal || !profile) return failure('Terminal ou Screen Profile não encontrado.');
     if (terminal.mode !== 'ASSISTED') return failure('Altere o Terminal para o modo ASSISTED antes do teste físico.');
     if (!terminal.enabled || terminal.paused) return failure('O Terminal precisa estar ativo e não pausado.');
     const display = screen.getAllDisplays()[profile.monitorIndex ?? 0] ?? screen.getPrimaryDisplay(); const validation = validateScreenProfile(profile, { width: display.size.width, height: display.size.height });
-    if (!validation.valid) return failure(validation.issues.join(' '));
+    const blockingIssues = validation.issues.filter(issue => issue.startsWith('Resolução') || issue.startsWith(parsed.data.coordinateKey));
+    if (blockingIssues.length) return failure(blockingIssues.join(' '));
     try { terminalManager.setScreenControllerState(terminal.id, 'PREPARING'); await screenAutomation.testCoordinate(profile, parsed.data.coordinateKey, screenTransform(display)); terminalManager.setScreenControllerState(terminal.id, 'READY'); database.logEvent('SCREEN_CONTROLLER', 'INFO', 'SCREEN_COORDINATE_CLICKED', { terminalId: terminal.id, coordinateKey: parsed.data.coordinateKey }); return success(true); }
     catch (error) { terminalManager.setScreenControllerState(terminal.id, 'ERROR'); const message = error instanceof Error ? error.message : String(error); database.logEvent('SCREEN_CONTROLLER', 'ERROR', 'SCREEN_COORDINATE_TEST_FAILED', { terminalId: terminal.id, coordinateKey: parsed.data.coordinateKey, error: message }); return failure(message); }
   });
@@ -406,6 +553,21 @@ function registerIpc() {
     await collectorManager.syncNow(parsed.data); return success(true);
   });
   ipcMain.handle('rounds:recent',(_event,raw)=>{const parsed=recentRoundsQuerySchema.safeParse(raw);return parsed.success?success(database.getRecentRoundsByFeed(parsed.data.platformId,parsed.data.limit)):failure('Filtro de rodadas inválido.');});
+  ipcMain.handle('bet-simulator:open',(_event,raw):ApiResult<boolean>=>{
+    const terminalId=typeof raw?.terminalId==='string'?raw.terminalId:undefined;
+    if(terminalId&&!database.getTerminal(terminalId))return failure('Terminal não encontrado.');
+    createBetSimulatorWindow(terminalId);return success(true);
+  });
+  ipcMain.handle('bet-simulator:calibrate',async(_event,raw):Promise<ApiResult<boolean>>=>{
+    const terminalId=typeof raw?.terminalId==='string'?raw.terminalId:'';
+    if(!terminalId)return failure('Terminal inválido.');
+    return calibrateBetSimulator(terminalId);
+  });
+  ipcMain.handle('bet-simulator:test',async(_event,raw):Promise<ApiResult<boolean>>=>{
+    const terminalId=typeof raw?.terminalId==='string'?raw.terminalId:'';
+    if(!terminalId)return failure('Terminal inválido.');
+    return testBetSimulator(terminalId);
+  });
   ipcMain.handle('ai:settings:get',():ApiResult<AiSettingsView>=>success(openRouterService.getSettings()));
   ipcMain.handle('ai:settings:save',(_event,raw):ApiResult<AiSettingsView>=>{const parsed=aiSettingsInputSchema.safeParse(raw);if(!parsed.success)return failure(parsed.error.issues.map(issue=>issue.message).join(' '));try{return success(openRouterService.saveSettings(parsed.data))}catch(error){return failure(error instanceof Error?error.message:'Não foi possível salvar a configuração da IA.')}});
   ipcMain.handle('ai:connection:test',async():Promise<ApiResult<{label:string;limit:number|null;limitRemaining:number|null}>>=>{try{return success(await openRouterService.testConnection())}catch(error){return failure(error instanceof Error?error.message:'Falha ao conectar ao OpenRouter.')}});
@@ -570,4 +732,21 @@ function terminalUsesConfiguration(terminal:Terminal,configurationId:string,kind
 
 function success<T>(data: T): ApiResult<T> { return { ok: true, data }; }
 function failure<T>(error: string): ApiResult<T> { return { ok: false, error }; }
+function preparationKey(request:AssistedPreparationRequest){return`${request.terminalId}:${request.stageIndex}:${request.betPlanId}:${request.amountsCents.join(',')}`;}
+function preparationIsCurrent(request:AssistedPreparationRequest){const runtime=terminalManager.getRuntime(request.terminalId);return Boolean(runtime?.galeRuntime.active&&runtime.galeRuntime.currentStage===request.stageIndex&&(runtime.galeRuntime.activeBetPlanId??database.getTerminal(request.terminalId)?.betPlanId)===request.betPlanId&&JSON.stringify(runtime.galeRuntime.preparedLegAmountsCents??[])===JSON.stringify(request.amountsCents));}
+function resumePendingAssistedPreparation(terminalId:string){const request=pendingAssistedPreparations.get(terminalId);if(!request)return;if(!preparationIsCurrent(request)){pendingAssistedPreparations.delete(terminalId);database.logEvent('SCREEN_CONTROLLER','WARN','SCREEN_PREPARE_DISCARDED',{terminalId,stageIndex:request.stageIndex,reason:'STAGE_NO_LONGER_CURRENT'});return;}database.logEvent('SCREEN_CONTROLLER','INFO','SCREEN_PREPARE_RESUMED',{terminalId,stageIndex:request.stageIndex});void executeAssistedPreparation(request,false);}
+async function executeAssistedPreparation(request:AssistedPreparationRequest,allowDeferral=true){
+  const terminal=database.getTerminal(request.terminalId);if(!terminal||request.deliveryMode!=='LIVE'||terminal.mode!=='ASSISTED'||!terminal.enabled||terminal.paused)return;
+  const runtime=terminalManager.getRuntime(terminal.id);
+  if(screenAutomation.isPaused()||runtime?.screenControllerState.paused){if(allowDeferral){pendingAssistedPreparations.set(terminal.id,{...request,amountsCents:[...request.amountsCents]});database.logEvent('SCREEN_CONTROLLER','WARN','SCREEN_PREPARE_DEFERRED',{terminalId:terminal.id,stageIndex:request.stageIndex,reason:screenAutomation.isPaused()?'GLOBAL_MOUSE_PAUSED':'TERMINAL_MOUSE_PAUSED'});}return;}
+  if(!preparationIsCurrent(request)){pendingAssistedPreparations.delete(terminal.id);return;}
+  const key=preparationKey(request);if(assistedPreparationsInFlight.has(key))return;assistedPreparationsInFlight.add(key);pendingAssistedPreparations.delete(terminal.id);
+  const profile=transientBetSimulatorProfiles.get(terminal.id)??database.getScreenProfiles().find(item=>item.terminalId===terminal.id);if(!profile){assistedPreparationsInFlight.delete(key);database.logEvent('SCREEN_CONTROLLER','WARN','SCREEN_VALIDATION_FAILED',{terminalId:terminal.id,reason:'PROFILE_MISSING'});return;}
+  const display=screen.getAllDisplays()[profile.monitorIndex??0]??screen.getPrimaryDisplay();const validation=validateScreenProfile(profile,{width:display.size.width,height:display.size.height});
+  if(!validation.valid){assistedPreparationsInFlight.delete(key);terminalManager.setScreenControllerState(terminal.id,'INVALID');database.logEvent('SCREEN_CONTROLLER','WARN','SCREEN_VALIDATION_FAILED',{terminalId:terminal.id,issues:validation.issues});return;}
+  const stage=database.getBetPlanConfig(request.betPlanId)?.stages[request.stageIndex];const preparationForSlot=(slot:1|2)=>{const index=stage?.legs.findIndex(leg=>leg.slot===slot)??-1;const leg=index>=0?stage?.legs[index]:undefined;return leg?{amountCents:request.amountsCents[index]??leg.amountCents,cashout:leg.cashout}:undefined;};const values=stage?{bet1:preparationForSlot(1),bet2:preparationForSlot(2)}:undefined;
+  try{terminalManager.setScreenControllerState(terminal.id,'PREPARING');database.logEvent('SCREEN_CONTROLLER','INFO','SCREEN_PREPARE_STARTED',{terminalId:terminal.id,stageIndex:request.stageIndex,values});const result=await screenAutomation.prepare(profile,screenTransform(display),values,true);terminalManager.setScreenControllerState(terminal.id,'READY');database.logEvent('SCREEN_CONTROLLER','INFO','SCREEN_PREPARE_FINISHED',result);}
+  catch(error){terminalManager.setScreenControllerState(terminal.id,'ERROR');database.logEvent('SCREEN_CONTROLLER','ERROR','SCREEN_PREPARE_FAILED',{terminalId:terminal.id,error:error instanceof Error?error.message:String(error)});}
+  finally{assistedPreparationsInFlight.delete(key);}
+}
 function screenTransform(display: Display) { return { x: Math.round(display.bounds.x * display.scaleFactor), y: Math.round(display.bounds.y * display.scaleFactor), scaleFactor: display.scaleFactor }; }

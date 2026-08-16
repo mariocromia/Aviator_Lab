@@ -157,6 +157,7 @@ export interface ScreenProfile {
   calibratedAt?: string | null;
   bet1: ScreenBetSlot;
   bet2: ScreenBetSlot;
+  inactivityBet?: { enabled: boolean; minutes: number; slot: 2; amountCents: number; cashout: number };
   updatedAt: string;
 }
 
@@ -183,7 +184,7 @@ export type ScreenAutomationAction =
   | { type: 'SELECT_ALL' }
   | { type: 'TYPE_TEXT'; text: string }
   | { type: 'DELAY'; milliseconds: number };
-export interface AssistedPreparationResult { terminalId: string; profileId: string; preparedSlots: number; finalClickBlocked: true; startedAt: string; finishedAt: string; }
+export interface AssistedPreparationResult { terminalId: string; profileId: string; preparedSlots: number; finalClickBlocked: boolean; startedAt: string; finishedAt: string; }
 
 export type AmountStrategyType = 'FIXED' | 'BANKROLL_PERCENTAGE' | 'PREVIOUS_AMOUNT_MULTIPLIER' | 'CURRENT_LOSS_STREAK' | 'LAST_LOSS_STREAK' | 'MANUAL_TABLE' | 'RECOVERY_TARGET' | 'FORMULA';
 export interface AmountStrategyConfig {
@@ -512,7 +513,7 @@ export interface TerminalRuntime {
   resultAnalyzerState: ResultAnalyzerState;
   sequenceAiRuntime: SequenceAiRuntime;
   betStrategyRuntime: { lastDecisionId: string | null; lastAction: BetAction | null; decisionCount: number; entryCount: number; ignoredCount: number };
-  galeRuntime: { active: boolean; currentStage: number; cycleId: string | null; activeBetPlanId: string | null; activeCombinationId?:string|null; onWinBetPlanId: string | null; followUp: boolean; followUpBehavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS'; triggerLossStreakTarget?: number | null; triggerLossProgress?:number; previousAmountCents?: number; accumulatedLossCents?: number; waitingSignals?: number; entryConfirmed?:boolean; failedCycleAttempts?:number; preparedLegAmountsCents?: number[]; currentCycleWinCount?:number; currentCycleLossCount?:number; lastCycleWinCount?:number; lastCycleLossCount?:number; operationalPreparationKey?:string|null };
+  galeRuntime: { active: boolean; currentStage: number; cycleId: string | null; activeBetPlanId: string | null; activeCombinationId?:string|null; onWinBetPlanId: string | null; followUp: boolean; followUpBehavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS'; triggerLossStreakTarget?: number | null; triggerLossProgress?:number; awaitingDynamicFirstGale?:boolean; previousAmountCents?: number; accumulatedLossCents?: number; waitingSignals?: number; entryConfirmed?:boolean; failedCycleAttempts?:number; preparedLegAmountsCents?: number[]; currentCycleWinCount?:number; currentCycleLossCount?:number; lastCycleWinCount?:number; lastCycleLossCount?:number; operationalPreparationKey?:string|null };
   bankrollState: BankrollMetrics;
   screenControllerState: { status: 'IDLE' | 'READY' | 'MOCKING' | 'PREPARING' | 'PAUSED' | 'INVALID' | 'ERROR'; paused: boolean };
   scheduleState: { allowed: boolean; reason: string | null; checkedAt: string | null };
@@ -537,6 +538,19 @@ export interface TerminalUpdateState {
   updatedAt: string;
 }
 
+export interface TerminalLossStreakStats {
+  historyMax: number;
+  bankrollMax: number;
+  galeLimit: number;
+  historyExceededGales: number;
+  bankrollExceededGales: number;
+  historyMaxOccurrences: number;
+  bankrollMaxOccurrences: number;
+  lastExceededGalesAt: string | null;
+  averageExceededGalesIntervalMs: number | null;
+  bankrollMinCents: number;
+  bankrollMaxCents: number;
+}
 export interface BootstrapData {
   session: UserSession | null;
   platforms: Platform[];
@@ -549,6 +563,7 @@ export interface BootstrapData {
   collectors: CollectorSnapshot[];
   terminalRuntimes: TerminalRuntime[];
   terminalHistories: Record<string, TerminalHistoryItem[]>;
+  terminalLossStreakStats: Record<string, TerminalLossStreakStats>;
   terminalUpdateStates: Record<string, TerminalUpdateState>;
   terminalHistoryDisplayMax: number;
   screenProfiles: ScreenProfile[];

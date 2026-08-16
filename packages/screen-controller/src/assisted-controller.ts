@@ -1,18 +1,21 @@
 import type { ScreenAutomationAction, ScreenProfile } from '@aviator/shared';
 
 export interface BetPreparationValues { bet1?: { amountCents: number; cashout: number }; bet2?: { amountCents: number; cashout: number }; }
+export interface AssistedPreparationOptions { clickAction?: boolean; }
 
 export interface ScreenTransform { x: number; y: number; scaleFactor: number; }
-export function buildAssistedPreparation(profile: ScreenProfile, transform: ScreenTransform, values?: BetPreparationValues): ScreenAutomationAction[] {
+export function buildAssistedPreparation(profile: ScreenProfile, transform: ScreenTransform, values?: BetPreparationValues, options: AssistedPreparationOptions = {}): ScreenAutomationAction[] {
   if (!profile.windowTitle?.trim()) throw new Error('Informe o título da janela antes do teste assistido.');
   const actions: ScreenAutomationAction[] = [{ type: 'FOCUS', windowTitle: profile.windowTitle.trim() }];
   for (const [name, slot] of [['bet1', profile.bet1], ['bet2', profile.bet2]] as const) {
     if (!slot.enabled) continue;
-    const configured = values?.[name] ?? slot;
+    const configured = values ? values[name] : slot;
+    if (!configured) continue;
+    const actionPoint = physical(slot.action, transform);
     actions.push(
       { type: 'MOVE', ...physical(slot.amount, transform) }, { type: 'CLICK', ...physical(slot.amount, transform) }, { type: 'SELECT_ALL' }, { type: 'TYPE_TEXT', text: (configured.amountCents / 100).toFixed(2) },
       { type: 'MOVE', ...physical(slot.cashoutField, transform) }, { type: 'CLICK', ...physical(slot.cashoutField, transform) }, { type: 'SELECT_ALL' }, { type: 'TYPE_TEXT', text: configured.cashout.toFixed(2) },
-      { type: 'MOVE', ...physical(slot.action, transform) }, { type: 'HIGHLIGHT', ...physical(slot.action, transform) }
+      { type: 'MOVE', ...actionPoint }, options.clickAction ? { type: 'CLICK', ...actionPoint } : { type: 'HIGHLIGHT', ...actionPoint }
     );
   }
   return actions;

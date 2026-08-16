@@ -45,6 +45,25 @@ describe('Histórico de Terminal dependente',()=>{
     expect(database.getTerminal(dependent.id)).toMatchObject({gameWins:1,gameLosses:0});
     database.close();
   });
+  it('calcula os máximos e conta sequências que ultrapassam os Gales no histórico e na banca',async()=>{
+    const directory=await mkdtemp(path.join(os.tmpdir(),'aviator-loss-streak-'));directories.push(directory);
+    process.env.AVIATOR_MASTER_EMAIL='loss-streak@local.test';process.env.AVIATOR_MASTER_PASSWORD='loss-streak-password';
+    const database=new AppDatabase(path.join(directory,'app.db'));
+    const terminal=database.listTerminals().find(item=>item.name==='Terminal Vector')!;
+    const start=Date.UTC(2026,7,15,12,0,0);
+    const results=['LOSS','LOSS','LOSS','LOSS','WIN','LOSS','LOSS','LOSS'] as const;
+    results.forEach((result,index)=>{
+      const occurredAt=new Date(start+index*1_000).toISOString();
+      const item={...round(terminal.platformId,result==='WIN'?2.1:1.2),occurredAt,collectedAt:occurredAt};
+      database.insertRound(item);
+      database.saveGameSignal({id:randomUUID(),terminalId:terminal.id,platformId:terminal.platformId,strategyId:terminal.gameStrategyId,triggerRoundId:item.id,resultRoundId:item.id,result,metadata:{multiplier:item.multiplier},createdAt:occurredAt});
+    });
+    database.setTerminalBankrollAnchor(terminal.id,10_000,new Date(start+4_000).toISOString());
+
+    expect(database.getTerminalLossStreakStats(terminal.id)).toEqual({historyMax:4,bankrollMax:3,galeLimit:2,historyExceededGales:2,bankrollExceededGales:1,historyMaxOccurrences:1,bankrollMaxOccurrences:1,lastExceededGalesAt:new Date(start+7_000).toISOString(),averageExceededGalesIntervalMs:5_000,bankrollMinCents:10_000,bankrollMaxCents:10_000});
+    expect(database.bootstrap().terminalLossStreakStats[terminal.id]).toEqual({historyMax:4,bankrollMax:3,galeLimit:2,historyExceededGales:2,bankrollExceededGales:1,historyMaxOccurrences:1,bankrollMaxOccurrences:1,lastExceededGalesAt:new Date(start+7_000).toISOString(),averageExceededGalesIntervalMs:5_000,bankrollMinCents:10_000,bankrollMaxCents:10_000});
+    database.close();
+  });
 });
 
 function round(platformId:string,multiplier:number):NormalizedRound{return{id:randomUUID(),platformId,externalId:randomUUID(),multiplier,occurredAt:new Date().toISOString(),collectedAt:new Date().toISOString(),source:'TIPMINER',deliveryMode:'LIVE',dedupKey:randomUUID()};}

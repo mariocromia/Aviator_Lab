@@ -590,4 +590,34 @@ describe('TerminalManager', () => {
     for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
     expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS']);
   });
+  it('places BASE after WIN and waits the remaining dynamic LOSS count before GALE 1',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('BASE no primeiro L, Gale após N');terminal.betStrategyWinId=crypto.randomUUID();terminal.betStrategyLossId=crypto.randomUUID();repository.saveTerminal(terminal);
+    repository.betStrategyConfigs.set(terminal.betStrategyWinId,{rules:[{id:'after-win',name:'Entrada após W',enabled:true,priority:1,conditions:[{field:'currentWinStreak',operator:'EQ',value:1}],action:'ENTER',onWinBetPlanId:terminal.betPlanWinId,onWinPlanBehavior:'REPEAT_UNTIL_LOSS'}]});
+    repository.betStrategyConfigs.set(terminal.betStrategyLossId,{rules:[{id:'dynamic-four',name:'Confirmar Gale no quarto L',enabled:true,priority:1,conditions:[{field:'currentLossStreak',operator:'EQ',referenceField:'lastClosedLossStreak'}],action:'ENTER'}]});
+    const preparations:number[]=[];const manager=new TerminalManager(repository,new RoundEventBus());manager.setAssistedPreparationHandler(request=>{preparations.push(request.stageIndex)});manager.initialize();
+    const runtime=manager.getRuntime(terminal.id)!;runtime.resultAnalyzerState={...runtime.resultAnalyzerState,currentLossStreak:4,currentWinStreak:0,lastClosedLossStreak:4,lastResult:'LOSS',recentPattern:'LLLL'};
+    for(const multiplier of[2.27,2.5])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(preparations).toEqual([0]);
+    for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS']);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime).toMatchObject({currentStage:1,entryConfirmed:false,awaitingDynamicFirstGale:true,triggerLossStreakTarget:4,preparedLegAmountsCents:[]});
+    for(const multiplier of[2.27,1.25,2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(preparations).toEqual([0]);
+    for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(preparations).toEqual([0,1]);
+    expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS']);
+    for(const multiplier of[2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(repository.stages.map(stage=>`${stage.stageLabel}:${stage.result}`)).toEqual(['BASE:LOSS','GALE 1:LOSS']);
+    expect(preparations).toEqual([0,1,2]);
+  });
+  it('finishes the live mouse preparation before publishing the armed entry',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Preparo prioritário');repository.saveTerminal(terminal);
+    let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve});let started=false;let finished=false;
+    const manager=new TerminalManager(repository,new RoundEventBus());manager.setAssistedPreparationHandler(async()=>{started=true;await gate;finished=true});manager.initialize();
+    for(const multiplier of[1.72,1.25,2.27])await manager.routeRoundToTerminals(makeRound(multiplier));
+    let published=false;const publication=manager.routeRoundToTerminals(makeRound(1.25)).then(result=>{published=true;return result});
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    expect(started).toBe(true);expect(finished).toBe(false);expect(published).toBe(false);
+    release();expect(await publication).toBe(1);expect(finished).toBe(true);expect(published).toBe(true);
+  });
 });

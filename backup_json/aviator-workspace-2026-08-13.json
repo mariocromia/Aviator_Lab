@@ -145,6 +145,481 @@
   ],
   "betPlans": [
     {
+      "id": "10101010-1010-4010-8010-101010101010",
+      "name": "Estrategia Base 10X",
+      "sortOrder": 1,
+      "config": {
+        "stages": [
+          {
+            "index": 0,
+            "label": "BASE",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 500,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 500
+                }
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "label": "GALE 1",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 560,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 560
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 2,
+            "label": "GALE 2",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 620,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 620
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 3,
+            "label": "GALE 3",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 690,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 690
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 4,
+            "label": "GALE 4",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 770,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 770
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 5,
+            "label": "GALE 5",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 850,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 850
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 6,
+            "label": "GALE 6",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 950,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 950
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 7,
+            "label": "GALE 7",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1050,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1050
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 8,
+            "label": "GALE 8",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1170,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1170
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 9,
+            "label": "GALE 9",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1300,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1300
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 10,
+            "label": "GALE 10",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1450,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1450
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 11,
+            "label": "GALE 11",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1610,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1610
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 12,
+            "label": "GALE 12",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1780,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1780
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 13,
+            "label": "GALE 13",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1980,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1980
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 14,
+            "label": "GALE 14",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 2200,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 2200
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 15,
+            "label": "GALE 15",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 2450,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 2450
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 16,
+            "label": "GALE 16",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 2720,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 2720
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 17,
+            "label": "GALE 17",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 3020,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 3020
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 18,
+            "label": "GALE 18",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 3360,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 3360
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 19,
+            "label": "GALE 19",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 3730,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 3730
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 20,
+            "label": "GALE 20",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 4150,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 4150
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 21,
+            "label": "GALE 21",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 4610,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 4610
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 22,
+            "label": "GALE 22",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 5120,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 5120
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 23,
+            "label": "GALE 23",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 5690,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 5690
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 24,
+            "label": "GALE 24",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 6320,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 6320
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 25,
+            "label": "GALE 25",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 7020,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 7020
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          }
+        ],
+        "continueOnTie": true
+      }
+    },
+    {
       "id": "77777777-7777-4777-8777-777777777777",
       "name": "Plano B • Entrada Dupla",
       "sortOrder": 2,
@@ -257,6 +732,956 @@
             ]
           }
         ]
+      }
+    },
+    {
+      "id": "bd8fd6f6-a848-4cc1-a07e-5d896b1e6506",
+      "name": "Plano 10X • R$ 5,00 até Gale 25 (Lucro Fixo)",
+      "sortOrder": 11,
+      "config": {
+        "stages": [
+          {
+            "index": 0,
+            "label": "BASE",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 500,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 500
+                }
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "label": "GALE 1",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 560,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 560
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 2,
+            "label": "GALE 2",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 620,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 620
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 3,
+            "label": "GALE 3",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 690,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 690
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 4,
+            "label": "GALE 4",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 770,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 770
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 5,
+            "label": "GALE 5",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 850,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 850
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 6,
+            "label": "GALE 6",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 950,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 950
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 7,
+            "label": "GALE 7",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1050,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1050
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 8,
+            "label": "GALE 8",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1170,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1170
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 9,
+            "label": "GALE 9",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1300,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1300
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 10,
+            "label": "GALE 10",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1450,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1450
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 11,
+            "label": "GALE 11",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1610,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1610
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 12,
+            "label": "GALE 12",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1780,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1780
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 13,
+            "label": "GALE 13",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1980,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1980
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 14,
+            "label": "GALE 14",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 2200,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 2200
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 15,
+            "label": "GALE 15",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 2450,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 2450
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 16,
+            "label": "GALE 16",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 2720,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 2720
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 17,
+            "label": "GALE 17",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 3020,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 3020
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 18,
+            "label": "GALE 18",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 3360,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 3360
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 19,
+            "label": "GALE 19",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 3730,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 3730
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 20,
+            "label": "GALE 20",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 4150,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 4150
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 21,
+            "label": "GALE 21",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 4610,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 4610
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 22,
+            "label": "GALE 22",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 5120,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 5120
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 23,
+            "label": "GALE 23",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 5690,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 5690
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 24,
+            "label": "GALE 24",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 6320,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 6320
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 25,
+            "label": "GALE 25",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 7020,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 7020
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          }
+        ],
+        "continueOnTie": true
+      }
+    },
+    {
+      "id": "10101010-1010-4010-8010-101010100001",
+      "name": "Plano 10X • R$ 1,00 (25 Gales)",
+      "sortOrder": 2,
+      "config": {
+        "stages": [
+          {
+            "index": 0,
+            "label": "BASE",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 100,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 100
+                }
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "label": "GALE 1",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 112,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 112
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 2,
+            "label": "GALE 2",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 124,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 124
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 3,
+            "label": "GALE 3",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 138,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 138
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 4,
+            "label": "GALE 4",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 153,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 153
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 5,
+            "label": "GALE 5",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 170,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 170
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 6,
+            "label": "GALE 6",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 189,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 189
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 7,
+            "label": "GALE 7",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 210,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 210
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 8,
+            "label": "GALE 8",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 233,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 233
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 9,
+            "label": "GALE 9",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 259,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 259
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 10,
+            "label": "GALE 10",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 288,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 288
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 11,
+            "label": "GALE 11",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 320,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 320
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 12,
+            "label": "GALE 12",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 356,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 356
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 13,
+            "label": "GALE 13",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 395,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 395
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 14,
+            "label": "GALE 14",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 439,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 439
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 15,
+            "label": "GALE 15",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 488,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 488
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 16,
+            "label": "GALE 16",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 542,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 542
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 17,
+            "label": "GALE 17",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 602,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 602
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 18,
+            "label": "GALE 18",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 669,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 669
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 19,
+            "label": "GALE 19",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 743,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 743
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 20,
+            "label": "GALE 20",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 826,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 826
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 21,
+            "label": "GALE 21",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 918,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 918
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 22,
+            "label": "GALE 22",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1020,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1020
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 23,
+            "label": "GALE 23",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1133,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1133
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 24,
+            "label": "GALE 24",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1259,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1259
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          },
+          {
+            "index": 25,
+            "label": "GALE 25",
+            "legs": [
+              {
+                "slot": 1,
+                "amountCents": 1399,
+                "cashout": 10,
+                "amountStrategy": {
+                  "type": "FIXED",
+                  "fixedCents": 1399
+                }
+              }
+            ],
+            "execution": {
+              "policy": "NEXT_VALID_SIGNAL"
+            }
+          }
+        ],
+        "continueOnTie": true
       }
     }
   ],

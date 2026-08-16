@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('aviator', {
   runScreenMock: (terminalId: string) => ipcRenderer.invoke('screen-profile:mock-run', { terminalId }),
   getScreenAutomationStatus: () => ipcRenderer.invoke('screen-automation:status'),
   setScreenAutomationPaused: (paused: boolean) => ipcRenderer.invoke('screen-automation:set-paused', { paused }),
+  setTerminalScreenAutomationEnabled: (terminalId: string, enabled: boolean) => ipcRenderer.invoke('screen-automation:set-terminal-enabled', { terminalId, enabled }),
   testScreenCoordinate: (terminalId: string, coordinateKey: string) => ipcRenderer.invoke('screen-automation:test-coordinate', { terminalId, coordinateKey }),
   testAssistedPreparation: (terminalId: string) => ipcRenderer.invoke('screen-automation:prepare-test', { terminalId }),
   createPlatform: (input: unknown) => ipcRenderer.invoke('platform:create', input),
@@ -35,6 +36,19 @@ contextBridge.exposeInMainWorld('aviator', {
   testPlatform: (input: unknown) => ipcRenderer.invoke('platform:test', input),
   syncCollectorNow: (platformId: string) => ipcRenderer.invoke('collector:sync-now', platformId),
   getRecentRounds:(platformId:string|null,limit:50|100|250|500)=>ipcRenderer.invoke('rounds:recent',{platformId,limit}),
+  openBetSimulator:(terminalId?:string)=>ipcRenderer.invoke('bet-simulator:open',{terminalId}),
+  calibrateBetSimulator:(terminalId:string)=>ipcRenderer.invoke('bet-simulator:calibrate',{terminalId}),
+  testBetSimulator:(terminalId:string)=>ipcRenderer.invoke('bet-simulator:test',{terminalId}),
+  onBetSimulatorRound:(callback:(round:unknown)=>void)=>{
+    const listener=(_event:Electron.IpcRendererEvent,round:unknown)=>callback(round);
+    ipcRenderer.on('bet-simulator:round',listener);
+    return()=>ipcRenderer.removeListener('bet-simulator:round',listener);
+  },
+  onBetSimulatorConfigure:(callback:(config:unknown)=>void)=>{
+    const listener=(_event:Electron.IpcRendererEvent,config:unknown)=>callback(config);
+    ipcRenderer.on('bet-simulator:configure',listener);
+    return()=>ipcRenderer.removeListener('bet-simulator:configure',listener);
+  },
   getAiSettings:()=>ipcRenderer.invoke('ai:settings:get'),
   saveAiSettings:(input:unknown)=>ipcRenderer.invoke('ai:settings:save',input),
   testAiConnection:()=>ipcRenderer.invoke('ai:connection:test'),

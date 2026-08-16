@@ -30,6 +30,7 @@ declare global {
       runScreenMock(terminalId: string): Promise<ApiResult<ScreenMockRun>>;
       getScreenAutomationStatus(): Promise<ApiResult<{paused:boolean;emergencyHotkey:string}>>;
       setScreenAutomationPaused(paused: boolean): Promise<ApiResult<boolean>>;
+      setTerminalScreenAutomationEnabled(terminalId:string,enabled:boolean):Promise<ApiResult<boolean>>;
       testScreenCoordinate(terminalId: string, coordinateKey: string): Promise<ApiResult<boolean>>;
       testAssistedPreparation(terminalId: string): Promise<ApiResult<boolean>>;
       createPlatform(input: unknown): Promise<ApiResult<Platform>>;
@@ -38,6 +39,11 @@ declare global {
       testPlatform(input: unknown): Promise<ApiResult<PlatformTestResult>>;
       syncCollectorNow(platformId: string): Promise<ApiResult<boolean>>;
       getRecentRounds(platformId:string|null,limit:50|100|250|500):Promise<ApiResult<import('@aviator/shared').NormalizedRound[]>>;
+      openBetSimulator(terminalId?:string):Promise<ApiResult<boolean>>;
+      calibrateBetSimulator(terminalId:string):Promise<ApiResult<boolean>>;
+      testBetSimulator(terminalId:string):Promise<ApiResult<boolean>>;
+      onBetSimulatorRound(callback:(round:import('@aviator/shared').NormalizedRound)=>void):()=>void;
+      onBetSimulatorConfigure(callback:(config:{platformId:string|null;terminalId:string|null;terminalName:string|null;bankrollCents:number})=>void):()=>void;
       getAiSettings():Promise<ApiResult<AiSettingsView>>;
       saveAiSettings(input:unknown):Promise<ApiResult<AiSettingsView>>;
       testAiConnection():Promise<ApiResult<{label:string;limit:number|null;limitRemaining:number|null}>>;

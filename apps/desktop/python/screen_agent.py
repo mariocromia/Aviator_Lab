@@ -4,8 +4,12 @@ import time
 import pyautogui
 import pygetwindow
 
+sys.stdin.reconfigure(encoding='utf-8')
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
 pyautogui.FAILSAFE = True
-pyautogui.PAUSE = 0.08
+pyautogui.PAUSE = 0.02
 
 def execute(action):
     kind = action['type']
@@ -17,17 +21,17 @@ def execute(action):
         if window.isMinimized:
             window.restore()
         window.activate()
-        time.sleep(0.35)
+        time.sleep(0.08)
     elif kind == 'MOVE':
-        pyautogui.moveTo(action['x'], action['y'], duration=0.25)
+        pyautogui.moveTo(action['x'], action['y'], duration=0.06)
     elif kind == 'CLICK':
         pyautogui.click(action['x'], action['y'])
     elif kind == 'SELECT_ALL':
         pyautogui.hotkey('ctrl', 'a')
     elif kind == 'TYPE_TEXT':
-        pyautogui.write(action['text'], interval=0.04)
+        pyautogui.write(action['text'], interval=0.005)
     elif kind == 'HIGHLIGHT':
-        pyautogui.moveTo(action['x'], action['y'], duration=0.25)
+        pyautogui.moveTo(action['x'], action['y'], duration=0.06)
         time.sleep(0.65)
     elif kind == 'DELAY':
         time.sleep(min(action['milliseconds'], 5000) / 1000)

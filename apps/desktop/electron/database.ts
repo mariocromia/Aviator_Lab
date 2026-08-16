@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
-import type { AuditRecord, BetCondition, BetDecision, BetExecution, BetPlanConfig, BetStageEvent, BetStrategyConfig, BootstrapData, ConfigurationDocument, ConfigurationKind, GameSignal, GameStrategyConfig, MultiplierCondition, NamedConfiguration, NormalizedRound, Platform, RecoverySnapshot, ResultAnalyzerState, RoundAnnotation, ScreenProfile, SystemDiagnostics, Terminal, TerminalControlRule, TerminalHistoryItem, TerminalPreset, TerminalRuntime, TerminalSchedule, UserSession, WorkspaceArchive } from '@aviator/shared';
+import type { AuditRecord, BetCondition, BetDecision, BetExecution, BetPlanConfig, BetStageEvent, BetStrategyConfig, BootstrapData, ConfigurationDocument, ConfigurationKind, GameSignal, GameStrategyConfig, MultiplierCondition, NamedConfiguration, NormalizedRound, Platform, RecoverySnapshot, ResultAnalyzerState, RoundAnnotation, ScreenProfile, SystemDiagnostics, Terminal, TerminalControlRule, TerminalHistoryItem, TerminalLossStreakStats, TerminalPreset, TerminalRuntime, TerminalSchedule, UserSession, WorkspaceArchive } from '@aviator/shared';
 import { BUILT_IN_PLATFORMS } from './platform-catalog.js';
 
 const IDS = {
@@ -337,7 +337,7 @@ export class AppDatabase {
     const terminals = this.listTerminals();
     const options = (table: string) => this.db.prepare(`SELECT id, name, sort_order AS sortOrder FROM ${table} ORDER BY CASE WHEN sort_order <= 0 THEN 1 ELSE 0 END, sort_order, name`).all() as { id: string; name: string; sortOrder:number }[];
     const terminalHistoryDisplayMax=Math.max(10,Math.min(5_000,this.getAppSetting<number>('terminal_history_display_max')??5_000));
-    return { session: this.getSession(), platforms, terminals, gameStrategies: options('game_strategies'), betStrategies: options('bet_strategies'), betPlans: options('bet_plans'), schedulePlans: options('schedule_plans'), recentRounds: this.getRecentRounds(undefined, 40), collectors: [], terminalRuntimes: [], terminalHistories: Object.fromEntries(terminals.map(terminal => [terminal.id, this.getTerminalHistory(terminal.id, terminalHistoryDisplayMax)])),terminalUpdateStates:{},terminalHistoryDisplayMax, screenProfiles: this.getScreenProfiles(), terminalSchedules: this.getTerminalSchedules(),terminalControlRules:this.listTerminalControlRules(), eventBus: { publishedEvents: 0, deliveredEvents: 0, failedDeliveries: 0, subscribersByPlatform: {} } };
+    return { session: this.getSession(), platforms, terminals, gameStrategies: options('game_strategies'), betStrategies: options('bet_strategies'), betPlans: options('bet_plans'), schedulePlans: options('schedule_plans'), recentRounds: this.getRecentRounds(undefined, 40), collectors: [], terminalRuntimes: [], terminalHistories: Object.fromEntries(terminals.map(terminal => [terminal.id, this.getTerminalHistory(terminal.id, terminalHistoryDisplayMax)])),terminalLossStreakStats:Object.fromEntries(terminals.map(terminal=>[terminal.id,this.getTerminalLossStreakStats(terminal.id)])),terminalUpdateStates:{},terminalHistoryDisplayMax, screenProfiles: this.getScreenProfiles(), terminalSchedules: this.getTerminalSchedules(),terminalControlRules:this.listTerminalControlRules(), eventBus: { publishedEvents: 0, deliveredEvents: 0, failedDeliveries: 0, subscribersByPlatform: {} } };
   }
 
   getPlatforms(): Platform[] { return this.db.prepare('SELECT * FROM platforms WHERE enabled = 1 ORDER BY name').all().map(mapPlatform); }
@@ -678,6 +678,35 @@ export class AppDatabase {
     });
   }
 
+  getTerminalLossStreakStats(terminalId:string):TerminalLossStreakStats{
+    const terminal=this.getTerminal(terminalId);
+    if(!terminal)return{historyMax:0,bankrollMax:0,galeLimit:0,historyExceededGales:0,bankrollExceededGales:0,historyMaxOccurrences:0,bankrollMaxOccurrences:0,lastExceededGalesAt:null,averageExceededGalesIntervalMs:null,bankrollMinCents:0,bankrollMaxCents:0};
+    const galeLimit=Math.max(0,(this.getBetPlanConfig(terminal.betPlanLossId)?.stages.length??1)-1);
+    const dependent=terminal.strategySourceTerminalId!==null;
+    const rows=this.db.prepare(`SELECT gs.result AS game_result,COALESCE(result_round.occurred_at,gs.created_at) AS occurred_at,be.id AS execution_id,be.result AS execution_result,be.bankroll_before_cents,be.bankroll_after_cents
+      FROM game_signals gs
+      LEFT JOIN rounds result_round ON result_round.id=gs.result_round_id
+      LEFT JOIN bet_executions be ON be.game_signal_id=gs.id AND be.terminal_id=gs.terminal_id
+      WHERE gs.terminal_id=? ${dependent?'AND be.id IS NOT NULL':''}
+      ORDER BY COALESCE(result_round.occurred_at,gs.created_at),gs.created_at`).all(terminalId) as Array<{game_result:string;occurred_at:string;execution_id:string|null;execution_result:string|null;bankroll_before_cents:number|null;bankroll_after_cents:number|null}>;
+    const anchor=terminal.bankrollStartAt?Date.parse(terminal.bankrollStartAt):null;
+    const historyStreaks:number[]=[];const bankrollStreaks:number[]=[];const exceededAt:number[]=[];
+    let historyCurrent=0;let bankrollCurrent=0;let bankrollMinCents=Math.min(terminal.initialBankrollCents,terminal.currentBankrollCents);let bankrollMaxCents=Math.max(terminal.initialBankrollCents,terminal.currentBankrollCents);
+    for(const row of rows){
+      const result=dependent&&row.execution_id?row.execution_result:row.game_result;const occurredAt=Date.parse(row.occurred_at);
+      if(result==='LOSS'){historyCurrent++;if(historyCurrent===galeLimit+1&&Number.isFinite(occurredAt))exceededAt.push(occurredAt);}else if(historyCurrent>0){historyStreaks.push(historyCurrent);historyCurrent=0;}
+      if(anchor===null||occurredAt>=anchor){
+        if(result==='LOSS')bankrollCurrent++;else if(bankrollCurrent>0){bankrollStreaks.push(bankrollCurrent);bankrollCurrent=0;}
+        for(const balance of [row.bankroll_before_cents,row.bankroll_after_cents])if(balance!==null&&Number.isFinite(balance)){bankrollMinCents=Math.min(bankrollMinCents,balance);bankrollMaxCents=Math.max(bankrollMaxCents,balance);}
+      }
+    }
+    if(historyCurrent>0)historyStreaks.push(historyCurrent);if(bankrollCurrent>0)bankrollStreaks.push(bankrollCurrent);
+    const historyMax=Math.max(0,...historyStreaks);const bankrollMax=Math.max(0,...bankrollStreaks);
+    const historyExceededGales=historyStreaks.filter(length=>length>galeLimit).length;const bankrollExceededGales=bankrollStreaks.filter(length=>length>galeLimit).length;
+    const historyMaxOccurrences=historyMax===0?0:historyStreaks.filter(length=>length===historyMax).length;const bankrollMaxOccurrences=bankrollMax===0?0:bankrollStreaks.filter(length=>length===bankrollMax).length;
+    const intervals=exceededAt.slice(1).map((timestamp,index)=>timestamp-exceededAt[index]);const averageExceededGalesIntervalMs=intervals.length?Math.round(intervals.reduce((total,value)=>total+value,0)/intervals.length):null;
+    return{historyMax,bankrollMax,galeLimit,historyExceededGales,bankrollExceededGales,historyMaxOccurrences,bankrollMaxOccurrences,lastExceededGalesAt:exceededAt.length?new Date(exceededAt.at(-1)!).toISOString():null,averageExceededGalesIntervalMs,bankrollMinCents,bankrollMaxCents};
+  }
   getScreenProfiles(): ScreenProfile[] {
     return (this.db.prepare('SELECT * FROM screen_profiles ORDER BY name').all() as Array<Record<string, string>>).map(row => ({ id: row.id, terminalId: row.terminal_id, name: row.name, ...JSON.parse(row.config_json) as Omit<ScreenProfile, 'id' | 'terminalId' | 'name' | 'updatedAt'>, updatedAt: row.updated_at }));
   }
@@ -733,7 +762,7 @@ export class AppDatabase {
   deleteAppSetting(key:string){this.db.prepare('DELETE FROM app_settings WHERE key=?').run(key);}
 
   saveScreenProfile(profile: ScreenProfile) {
-    const config = { resolutionWidth: profile.resolutionWidth, resolutionHeight: profile.resolutionHeight, windowTitle: profile.windowTitle, monitorIndex: profile.monitorIndex ?? null, calibratedAt: profile.calibratedAt ?? null, bet1: profile.bet1, bet2: profile.bet2 };
+    const config = { resolutionWidth: profile.resolutionWidth, resolutionHeight: profile.resolutionHeight, windowTitle: profile.windowTitle, monitorIndex: profile.monitorIndex ?? null, calibratedAt: profile.calibratedAt ?? null, bet1: profile.bet1, bet2: profile.bet2, inactivityBet: profile.inactivityBet };
     this.db.prepare(`INSERT INTO screen_profiles VALUES (?, ?, ?, ?, ?) ON CONFLICT(terminal_id) DO UPDATE SET name = excluded.name, config_json = excluded.config_json, updated_at = excluded.updated_at`)
       .run(profile.id, profile.terminalId, profile.name, JSON.stringify(config), profile.updatedAt);
     this.db.prepare('UPDATE terminals SET screen_profile_id = ?, updated_at = ? WHERE id = ?').run(profile.id, profile.updatedAt, profile.terminalId);
@@ -777,7 +806,7 @@ export class AppDatabase {
       const terminalSql = `INSERT INTO terminals (id,name,platform_id,game_strategy_id,strategy_source_terminal_id,strategy_source_mode,bet_strategy_id,bet_strategy_win_id,bet_strategy_loss_id,bet_plan_id,bet_plan_win_id,bet_plan_loss_id,screen_profile_id,mode,enabled,paused,history_display_limit,analysis_round_limit,bankroll_start_at,entry_block_patterns_json,operation_combinations_json,initial_bankroll_cents,current_bankroll_cents,game_wins,game_losses,created_at,updated_at,sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,sort_order=excluded.sort_order,platform_id=excluded.platform_id,game_strategy_id=excluded.game_strategy_id,strategy_source_terminal_id=excluded.strategy_source_terminal_id,strategy_source_mode=excluded.strategy_source_mode,bet_strategy_id=excluded.bet_strategy_id,bet_strategy_win_id=excluded.bet_strategy_win_id,bet_strategy_loss_id=excluded.bet_strategy_loss_id,bet_plan_id=excluded.bet_plan_id,bet_plan_win_id=excluded.bet_plan_win_id,bet_plan_loss_id=excluded.bet_plan_loss_id,screen_profile_id=excluded.screen_profile_id,mode=excluded.mode,enabled=excluded.enabled,paused=excluded.paused,history_display_limit=excluded.history_display_limit,analysis_round_limit=excluded.analysis_round_limit,bankroll_start_at=excluded.bankroll_start_at,entry_block_patterns_json=excluded.entry_block_patterns_json,operation_combinations_json=excluded.operation_combinations_json,initial_bankroll_cents=excluded.initial_bankroll_cents,current_bankroll_cents=excluded.current_bankroll_cents,updated_at=excluded.updated_at`;
       for (const item of archive.terminals) this.db.prepare(terminalSql).run(item.id,item.name,item.platformId,item.gameStrategyId,item.strategySourceTerminalId,item.strategySourceMode,item.betStrategyId,item.betStrategyWinId,item.betStrategyLossId,item.betPlanId,item.betPlanWinId,item.betPlanLossId,item.screenProfileId,item.mode,Number(item.enabled),Number(item.paused),item.historyDisplayLimit??5_000,item.analysisRoundLimit??5_000,item.bankrollStartAt??null,JSON.stringify(item.entryBlockPatterns??[]),JSON.stringify(item.operationCombinations??[]),item.initialBankrollCents,item.currentBankrollCents,item.gameWins,item.gameLosses,item.createdAt,item.updatedAt,item.sortOrder);
       const profileSql = `INSERT INTO screen_profiles VALUES (?, ?, ?, ?, ?) ON CONFLICT(terminal_id) DO UPDATE SET name=excluded.name,config_json=excluded.config_json,updated_at=excluded.updated_at`;
-      for (const item of archive.screenProfiles) { const config={resolutionWidth:item.resolutionWidth,resolutionHeight:item.resolutionHeight,windowTitle:item.windowTitle,monitorIndex:item.monitorIndex??null,calibratedAt:item.calibratedAt??null,bet1:item.bet1,bet2:item.bet2}; this.db.prepare(profileSql).run(item.id,item.terminalId,item.name,JSON.stringify(config),item.updatedAt); this.db.prepare('UPDATE terminals SET screen_profile_id=? WHERE id=?').run(item.id,item.terminalId); }
+      for (const item of archive.screenProfiles) { const config={resolutionWidth:item.resolutionWidth,resolutionHeight:item.resolutionHeight,windowTitle:item.windowTitle,monitorIndex:item.monitorIndex??null,calibratedAt:item.calibratedAt??null,bet1:item.bet1,bet2:item.bet2,inactivityBet:item.inactivityBet}; this.db.prepare(profileSql).run(item.id,item.terminalId,item.name,JSON.stringify(config),item.updatedAt); this.db.prepare('UPDATE terminals SET screen_profile_id=? WHERE id=?').run(item.id,item.terminalId); }
       for(const item of archive.terminalSchedules??[])this.db.prepare('INSERT INTO terminal_schedule_assignments VALUES (?, ?, ?) ON CONFLICT(terminal_id) DO UPDATE SET schedule_plan_id=excluded.schedule_plan_id,updated_at=excluded.updated_at').run(item.terminalId,item.schedulePlanId,item.updatedAt);
       for(const item of archive.terminalControlRules??[])this.db.prepare('INSERT INTO global_control_rules VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,enabled=excluded.enabled,metric=excluded.metric,operator=excluded.operator,value=excluded.value,reference_metric=excluded.reference_metric,action=excluded.action,updated_at=excluded.updated_at,sort_order=excluded.sort_order').run(item.id,item.name,Number(item.enabled),item.metric,item.operator,item.value,item.referenceMetric??null,item.action,item.createdAt,item.updatedAt,item.sortOrder);
       for(const item of archive.terminals)this.setTerminalControlRuleAssignments(item.id,item.controlPlayRuleIds,item.controlPauseRuleIds);

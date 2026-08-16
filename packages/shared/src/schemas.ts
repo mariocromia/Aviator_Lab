@@ -88,7 +88,8 @@ const screenBetSlotSchema = z.object({
 export const saveScreenProfileInputSchema = z.object({
   terminalId: z.string().uuid(), name: z.string().trim().min(2).max(80),
   resolutionWidth: z.number().int().min(640).max(20_000), resolutionHeight: z.number().int().min(480).max(20_000),
-  windowTitle: z.string().trim().max(200).nullable(), monitorIndex: z.number().int().min(0).max(32).nullable().optional(), calibratedAt: z.string().datetime().nullable().optional(), bet1: screenBetSlotSchema, bet2: screenBetSlotSchema
+  windowTitle: z.string().trim().max(200).nullable(), monitorIndex: z.number().int().min(0).max(32).nullable().optional(), calibratedAt: z.string().datetime().nullable().optional(), bet1: screenBetSlotSchema, bet2: screenBetSlotSchema,
+  inactivityBet: z.object({ enabled: z.boolean(), minutes: z.number().int().min(1).max(1_440), slot: z.literal(2), amountCents: z.number().int().positive().max(100_000_000), cashout: z.number().gt(1).max(10_000) }).optional()
 });
 
 export const screenProfileActionSchema = z.object({ terminalId: z.string().uuid() });

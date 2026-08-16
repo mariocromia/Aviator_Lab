@@ -10,13 +10,13 @@ export class ScreenAutomationService {
   isPaused() { return this.lock.isPaused(); }
   testCoordinate(profile: ScreenProfile, key: ScreenCoordinateKey, transform: ScreenTransform) {
     const point = coordinate(profile, key); const actions: ScreenAutomationAction[] = [];
-    if (profile.windowTitle?.trim()) actions.push({ type: 'FOCUS', windowTitle: profile.windowTitle.trim() });
+
     const physical = { x: Math.round(transform.x + point.x * transform.scaleFactor), y: Math.round(transform.y + point.y * transform.scaleFactor) };
     actions.push({ type: 'MOVE', ...physical }, { type: 'CLICK', ...physical });
     return this.lock.run(profile.terminalId, () => this.agent.execute(actions));
   }
-  prepare(profile: ScreenProfile, transform: ScreenTransform, values?: BetPreparationValues): Promise<AssistedPreparationResult> {
-    return this.lock.run(profile.terminalId, async () => { const startedAt = new Date().toISOString(); await this.agent.execute(buildAssistedPreparation(profile, transform, values)); return { terminalId: profile.terminalId, profileId: profile.id, preparedSlots: Number(profile.bet1.enabled) + Number(profile.bet2.enabled), finalClickBlocked: true, startedAt, finishedAt: new Date().toISOString() }; });
+  prepare(profile: ScreenProfile, transform: ScreenTransform, values?: BetPreparationValues, clickAction = false): Promise<AssistedPreparationResult> {
+    return this.lock.run(profile.terminalId, async () => { const startedAt = new Date().toISOString(); await this.agent.execute(buildAssistedPreparation(profile, transform, values, { clickAction })); const preparedSlots = values ? Number(profile.bet1.enabled && Boolean(values.bet1)) + Number(profile.bet2.enabled && Boolean(values.bet2)) : Number(profile.bet1.enabled) + Number(profile.bet2.enabled); return { terminalId: profile.terminalId, profileId: profile.id, preparedSlots, finalClickBlocked: !clickAction, startedAt, finishedAt: new Date().toISOString() }; });
   }
 }
 

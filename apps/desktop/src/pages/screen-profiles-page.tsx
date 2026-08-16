@@ -41,8 +41,8 @@ function CalibrationModal({ terminal, profile, mock, setMock, onClose }: { termi
     if (!terminal) return;
     const slot = { enabled: true, amountCents: 100, cashout: 2, amount: { x: 0, y: 0 }, cashoutField: { x: 0, y: 0 }, action: { x: 0, y: 0 } };
     setDraft(profile ? structuredClone(profile) : { id: '', terminalId: terminal.id, name: `Perfil ${terminal.name}`, resolutionWidth: 1920, resolutionHeight: 1080, windowTitle: null, monitorIndex: 0, calibratedAt: null, bet1: slot, bet2: { ...structuredClone(slot), enabled: false, cashout: 10 }, updatedAt: new Date().toISOString() });
-  }, [terminal, profile]);
-  useEffect(() => { if (terminal) void window.aviator.getScreenAutomationStatus().then(result => { if (result.ok && result.data) setAutomationPaused(result.data.paused); }); }, [terminal]);
+  }, [terminal?.id, profile?.updatedAt]);
+  useEffect(() => { if (terminal) void window.aviator.getScreenAutomationStatus().then(result => { if (result.ok && result.data) setAutomationPaused(result.data.paused); }); }, [terminal?.id]);
 
   const points = useMemo(() => draft ? coordinates.map(item => ({ ...item, point: getPoint(draft, item.key), enabled: item.key.startsWith('bet1') ? draft.bet1.enabled : draft.bet2.enabled })) : [], [draft]);
   if (!draft) return <Modal title="Calibração" open={false} onClose={onClose}><span/></Modal>;
@@ -59,7 +59,7 @@ function CalibrationModal({ terminal, profile, mock, setMock, onClose }: { termi
     setSaving(true);
     const result = await window.aviator.saveScreenProfile({ ...draft, calibratedAt: new Date().toISOString() });
     setSaving(false);
-    if (!result.ok || !result.data) return false;
+    if (!result.ok || !result.data) { setPhysicalError(result.error ?? 'Não foi possível salvar o perfil.'); return false; }
     setDraft(result.data); await store.refresh(); if (close) onClose(); return true;
   }
 
@@ -71,14 +71,21 @@ function CalibrationModal({ terminal, profile, mock, setMock, onClose }: { termi
   }
 
   async function setAutomation(paused: boolean) { const result = await window.aviator.setScreenAutomationPaused(paused); if (result.ok) { setAutomationPaused(paused); setPhysicalError(null); } else setPhysicalError(result.error ?? 'Não foi possível alterar a automação.'); }
-  async function testPhysicalCoordinate(key: ScreenCoordinateKey, label: string) {
+  async function testPhysicalCoordinate(key: ScreenCoordinateKey) {
     setPhysicalError(null);
-    if (!window.confirm(`O mouse será movido e realizará UM clique real em “${label}”. Continuar?`)) return;
+    if (!await save(false)) return;
+
+    if (automationPaused) {
+      const activation = await window.aviator.setScreenAutomationPaused(false);
+      if (!activation.ok) { setPhysicalError(activation.error ?? 'Não foi possível ativar o modo assistido.'); return; }
+      setAutomationPaused(false);
+    }
     const result = await window.aviator.testScreenCoordinate(draft!.terminalId, key);
     if (!result.ok) setPhysicalError(result.error ?? 'O teste físico falhou.');
   }
   async function testRealPreparation() {
     setPhysicalError(null);
+    if (!await save(false)) return;
     if (!window.confirm('O bot focará a janela e preencherá valor/cashout. Os botões de ação NÃO serão clicados. Continuar?')) return;
     const result = await window.aviator.testAssistedPreparation(draft!.terminalId);
     if (!result.ok) setPhysicalError(result.error ?? 'O preenchimento assistido falhou.');
@@ -91,7 +98,9 @@ function CalibrationModal({ terminal, profile, mock, setMock, onClose }: { termi
           <div className="mb-4 rounded-md border border-brand/25 bg-brand/10 p-3 text-[10px] leading-5 text-blue-100"><ShieldCheck size={15} className="mb-1 text-blue-300"/>Ao capturar, você terá 3 segundos para posicionar o cursor no alvo. O mock não move o mouse nem confirma apostas.</div>
           <div className="grid grid-cols-2 gap-3"><Label text="Nome"><input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })}/></Label><Label text="Monitor"><input type="number" min="0" value={draft.monitorIndex ?? 0} onChange={event => setDraft({ ...draft, monitorIndex: Number(event.target.value) })}/></Label><Label text="Largura"><input type="number" value={draft.resolutionWidth} onChange={event => setDraft({ ...draft, resolutionWidth: Number(event.target.value) })}/></Label><Label text="Altura"><input type="number" value={draft.resolutionHeight} onChange={event => setDraft({ ...draft, resolutionHeight: Number(event.target.value) })}/></Label><Label text="Título da janela" wide><input value={draft.windowTitle ?? ''} onChange={event => setDraft({ ...draft, windowTitle: event.target.value || null })} placeholder="Opcional"/></Label></div>
           <div className="mt-4 flex gap-4 text-[10px]"><Toggle label="Bet 1" checked={draft.bet1.enabled} onChange={enabled => setDraft({ ...draft, bet1: { ...draft.bet1, enabled } })}/><Toggle label="Bet 2" checked={draft.bet2.enabled} onChange={enabled => setDraft({ ...draft, bet2: { ...draft.bet2, enabled } })}/></div>
-          <div className="mt-4 space-y-2">{points.map(item => <div key={item.key} className={`rounded-md border p-3 ${item.enabled ? 'border-line bg-canvas' : 'border-line/50 opacity-45'}`}><div className="flex items-center justify-between gap-2"><div className="min-w-0 flex-1"><div className="truncate text-[10px] font-semibold">{item.label}</div><div className="mt-1 font-mono text-[9px] text-muted">X {item.point.x} • Y {item.point.y}</div></div><Button disabled={!item.enabled || capturing !== null} onClick={() => void capture(item.key)} className="border-line bg-elevated px-2 text-muted"><MousePointer2 size={12}/>{capturing === item.key ? `${countdown}s` : 'Capturar'}</Button><Button disabled={!item.enabled || capturing !== null || automationPaused} onClick={() => void testPhysicalCoordinate(item.key, item.label)} className="border-line bg-elevated px-2 text-warning">Testar clique</Button></div></div>)}</div>
+          <TestValues profile={draft} onChange={setDraft}/>
+          <InactivityBet profile={draft} onChange={setDraft}/>
+          <div className="mt-4 space-y-2">{points.map(item => <div key={item.key} className={`rounded-md border p-3 ${item.enabled ? 'border-line bg-canvas' : 'border-line/50 opacity-45'}`}><div className="flex items-center justify-between gap-2"><div className="min-w-0 flex-1"><div className="truncate text-[10px] font-semibold">{item.label}</div><div className="mt-1 font-mono text-[9px] text-muted">X {item.point.x} • Y {item.point.y}</div></div><Button disabled={!item.enabled || capturing !== null} onClick={() => void capture(item.key)} className="border-line bg-elevated px-2 text-muted"><MousePointer2 size={12}/>{capturing === item.key ? `${countdown}s` : 'Capturar'}</Button><Button disabled={!item.enabled || capturing !== null || saving} onClick={() => void testPhysicalCoordinate(item.key)} className="border-line bg-elevated px-2 text-warning">Testar clique</Button></div></div>)}</div>
           {physicalError && <div className="mt-3 rounded-md border border-danger/25 bg-danger/10 p-3 text-[10px] leading-5 text-red-200">{physicalError}</div>}
         </div>
         <footer className="shrink-0 border-t border-line bg-panel p-4 shadow-[0_-10px_30px_rgba(0,0,0,.25)]"><div className="mb-2 flex items-center justify-between text-[9px] text-muted"><span>Emergência: Ctrl+Shift+F12</span><button onClick={() => void setAutomation(!automationPaused)} className={`rounded-full border px-2 py-1 font-bold ${automationPaused ? 'border-warning/30 text-warning' : 'border-success/30 text-success'}`}>{automationPaused ? 'ATIVAR ASSISTIDO' : 'ASSISTIDO ATIVO'}</button></div><div className="grid grid-cols-3 gap-2"><Button onClick={() => void save()} disabled={saving || capturing !== null} className="border-line bg-elevated px-2 text-ink">{saving ? 'Salvando...' : 'Salvar'}</Button><Button onClick={() => void test()} disabled={saving || capturing !== null} className="border-line bg-elevated px-2 text-muted"><Play size={12}/>Mock</Button><Button onClick={() => void testRealPreparation()} disabled={saving || capturing !== null || automationPaused} className="bg-brand px-2 text-white">Preencher real</Button></div></footer>
@@ -101,6 +110,16 @@ function CalibrationModal({ terminal, profile, mock, setMock, onClose }: { termi
   </Modal>;
 }
 
+function TestValues({profile,onChange}:{profile:ScreenProfile;onChange(value:ScreenProfile):void}) {
+  const update=(name:'bet1'|'bet2',patch:Partial<ScreenProfile['bet1']>)=>onChange({...profile,[name]:{...profile[name],...patch}});
+  return <div className="mt-4 rounded-md border border-brand/20 bg-brand/5 p-3"><div className="mb-2 text-[10px] font-bold text-blue-200">VALORES SOMENTE PARA TESTAR O PREENCHIMENTO</div><div className="grid grid-cols-2 gap-2"><Label text="Bet 1 • Valor (R$)"><input type="number" min="0.01" step="0.01" value={(profile.bet1.amountCents/100).toFixed(2)} onChange={event=>update('bet1',{amountCents:Math.round(Number(event.target.value)*100)})}/></Label><Label text="Bet 1 • Saída"><input type="number" min="1.01" step="0.01" value={profile.bet1.cashout} onChange={event=>update('bet1',{cashout:Number(event.target.value)})}/></Label><Label text="Bet 2 • Valor (R$)"><input type="number" min="0.01" step="0.01" value={(profile.bet2.amountCents/100).toFixed(2)} onChange={event=>update('bet2',{amountCents:Math.round(Number(event.target.value)*100)})}/></Label><Label text="Bet 2 • Saída"><input type="number" min="1.01" step="0.01" value={profile.bet2.cashout} onChange={event=>update('bet2',{cashout:Number(event.target.value)})}/></Label></div><p className="mt-2 text-[9px] text-muted">Nas apostas normais, valor e saída vêm dinamicamente da etapa BASE/Gale do plano.</p></div>;
+}
+
+function InactivityBet({profile,onChange}:{profile:ScreenProfile;onChange(value:ScreenProfile):void}) {
+  const rule=profile.inactivityBet??{enabled:false,minutes:5,slot:2 as const,amountCents:100,cashout:1.05};
+  const update=(patch:Partial<typeof rule>)=>onChange({...profile,inactivityBet:{...rule,...patch}});
+  return <div className="mt-4 rounded-md border border-warning/25 bg-warning/5 p-3"><Toggle label="Anti-inatividade na Bet 2" checked={rule.enabled} onChange={enabled=>update({enabled})}/><div className="mt-3 grid grid-cols-3 gap-2"><Label text="Após minutos"><input type="number" min="1" max="1440" value={rule.minutes} onChange={event=>update({minutes:Number(event.target.value)})}/></Label><Label text="Valor Bet 2 (R$)"><input type="number" min="0.01" step="0.01" value={(rule.amountCents/100).toFixed(2)} onChange={event=>update({amountCents:Math.round(Number(event.target.value)*100)})}/></Label><Label text="Saída"><input type="number" min="1.01" step="0.01" value={rule.cashout} onChange={event=>update({cashout:Number(event.target.value)})}/></Label></div><p className="mt-2 text-[9px] text-muted">Executa uma vez após o período sem atividade no Windows e rearma quando houver novo movimento ou tecla.</p></div>;
+}
 function getPoint(profile: ScreenProfile, key: ScreenCoordinateKey): ScreenPosition { const slot = key.startsWith('bet1') ? profile.bet1 : profile.bet2; return key.endsWith('.amount') ? slot.amount : key.endsWith('.cashout') ? slot.cashoutField : slot.action; }
 function setPoint(profile: ScreenProfile, key: ScreenCoordinateKey, point: ScreenPosition): ScreenProfile { const name = key.startsWith('bet1') ? 'bet1' : 'bet2'; const slot = { ...profile[name] }; if (key.endsWith('.amount')) slot.amount = point; else if (key.endsWith('.cashout')) slot.cashoutField = point; else slot.action = point; return { ...profile, [name]: slot }; }
 function Summary({ label, value }: { label: string; value: number }) { return <Card className="p-4"><div className="label">{label}</div><div className="mt-2 font-mono text-xl font-bold">{value}</div></Card>; }

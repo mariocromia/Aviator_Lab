@@ -72,6 +72,7 @@ export class TerminalManager {
   private readonly betStrategyEngine = new BetStrategyEngine();
   private readonly runtimes = new Map<string, TerminalRuntime>();
   private readonly unsubscribeByTerminal = new Map<string, () => void>();
+  private readonly roundPreparationTasks = new Map<string, Promise<void>[]>();
   private assistedPreparationHandler: ((request: {terminalId:string;deliveryMode:NormalizedRound['deliveryMode'];stageIndex:number;betPlanId:string;amountsCents:number[]}) => void | Promise<void>) | null = null;
 
   constructor(private readonly repository: TerminalRuntimeRepository, private readonly eventBus: RoundEventBus) {}
@@ -226,6 +227,12 @@ export class TerminalManager {
     runtime.screenControllerState.status = status; runtime.updatedAt = new Date().toISOString(); this.repository.saveTerminalRuntime(runtime);
   }
 
+  setScreenControllerPaused(id: string, paused: boolean) {
+    const runtime = this.runtimes.get(id); if (!runtime) return false;
+    runtime.screenControllerState.paused = paused;
+    runtime.screenControllerState.status = paused ? 'PAUSED' : 'READY';
+    runtime.updatedAt = new Date().toISOString(); this.repository.saveTerminalRuntime(runtime); return true;
+  }
   startRuntime(id: string):boolean {
     const terminal = this.repository.getTerminal(id); const runtime = this.runtimes.get(id);
     if (!terminal || !runtime || !terminal.enabled) return false;
@@ -257,6 +264,7 @@ export class TerminalManager {
     // aposta apos reiniciar o aplicativo desaparecer.
     runtime.galeRuntime.triggerLossStreakTarget ??= null;
     runtime.galeRuntime.triggerLossProgress ??= 0;
+    runtime.galeRuntime.awaitingDynamicFirstGale ??= false;
     runtime.galeRuntime.activeBetPlanId ??= null;
     runtime.galeRuntime.onWinBetPlanId ??= null;
     runtime.galeRuntime.followUp ??= false;
@@ -301,7 +309,7 @@ export class TerminalManager {
 
   private attach(terminal: Terminal) {
     this.unsubscribeByTerminal.get(terminal.id)?.();
-    this.unsubscribeByTerminal.set(terminal.id, this.eventBus.subscribe(terminal.platformId, terminal.id, event => this.processRound(terminal.id, event),this.referenceDepth(terminal)));
+    this.unsubscribeByTerminal.set(terminal.id, this.eventBus.subscribe(terminal.platformId, terminal.id, async event => {const tasks:Promise<void>[]=[];this.roundPreparationTasks.set(terminal.id,tasks);try{this.processRound(terminal.id,event);if(tasks.length)await Promise.allSettled(tasks);}finally{this.roundPreparationTasks.delete(terminal.id);}},this.referenceDepth(terminal)));
   }
 
   private referenceDepth(terminal:Terminal){let depth=0;let current=terminal;const visited=new Set<string>([terminal.id]);while(current.strategySourceTerminalId){const source=this.repository.getTerminal(current.strategySourceTerminalId);if(!source||visited.has(source.id))break;visited.add(source.id);depth++;current=source;}return depth;}
@@ -346,7 +354,8 @@ export class TerminalManager {
           const continuousOperationalGale=result.signal.metadata.operationalContinuation===true&&terminal.strategySourceMode==='BET_EXECUTIONS';
           const activeCombination=terminal.operationCombinations.find(item=>item.id===runtime.galeRuntime.activeCombinationId);
           const sequenceAiReentryPending=stageIndex>0&&runtime.galeRuntime.entryConfirmed===false&&activeCombination?.triggerType==='SEQUENCE_AI';
-          if(sequenceAiReentryPending||(!continuousOperationalGale&&!isStageReady(stage?.execution,runtime,result.signal.result))){runtime.galeRuntime.waitingSignals=(runtime.galeRuntime.waitingSignals??0)+1;}else{
+          const dynamicFirstGalePending=stageIndex===1&&runtime.galeRuntime.entryConfirmed===false&&runtime.galeRuntime.awaitingDynamicFirstGale===true;
+          if(sequenceAiReentryPending||dynamicFirstGalePending||(!continuousOperationalGale&&!isStageReady(stage?.execution,runtime,result.signal.result))){runtime.galeRuntime.waitingSignals=(runtime.galeRuntime.waitingSignals??0)+1;}else{
           runtime.galeRuntime.waitingSignals=0;
           const multiplier = Number(result.signal.metadata.multiplier ?? event.round.multiplier);
           const resolvedLegs = stage?.legs.map((leg,index)=>({...leg,resolvedAmountCents:runtime.galeRuntime.preparedLegAmountsCents?.[index]??calculateBetAmount(leg,{bankrollCents:runtime.bankrollState.currentBalanceCents,initialBankrollCents:runtime.bankrollState.initialBalanceCents,previousAmountCents:runtime.galeRuntime.previousAmountCents??0,currentLossStreak:runtime.resultAnalyzerState.currentLossStreak,lastLossStreak:runtime.resultAnalyzerState.lastClosedLossStreak,accumulatedLossCents:runtime.galeRuntime.accumulatedLossCents??0,stageIndex,cashout:leg.cashout})}))??[];
@@ -424,7 +433,9 @@ export class TerminalManager {
             runtime.galeRuntime.waitingSignals=0;
             runtime.galeRuntime.entryConfirmed=false;
             const nextStage=betPlan?.stages[runtime.galeRuntime.currentStage];
-            if(nextStage?.execution?.policy==='AFTER_ENTRY_CONFIRMATION')runtime.galeRuntime.preparedLegAmountsCents=[];
+            const waitForDynamicFirstGale=runtime.galeRuntime.currentStage===1&&stageResult==='LOSS'&&(cycleLossStreakTarget??0)>1&&runtime.resultAnalyzerState.currentLossStreak===0;
+            runtime.galeRuntime.awaitingDynamicFirstGale=waitForDynamicFirstGale;
+            if(nextStage?.execution?.policy==='AFTER_ENTRY_CONFIRMATION'||waitForDynamicFirstGale)runtime.galeRuntime.preparedLegAmountsCents=[];
             else{const amountsCents=resolveStageAmounts(runtime,betPlan,runtime.galeRuntime.currentStage,stageResult==='LOSS'?1:0);runtime.galeRuntime.preparedLegAmountsCents=amountsCents;runtime.galeRuntime.operationalPreparationKey=null;if(terminal.strategySourceMode==='BET_EXECUTIONS')this.prepareOperationalStage(terminal,runtime,event.round);else if(!awaitsReferencedSignalPreparation(terminal))this.prepareStageOrPause(terminal,runtime,event.round.deliveryMode,runtime.galeRuntime.currentStage,activeBetPlanId,amountsCents);}
           }
           }
@@ -512,8 +523,9 @@ export class TerminalManager {
             const activeBetPlan=this.repository.getBetPlanConfig(activeBetPlanId);
             const activeStage=activeBetPlan?.stages[runtime.galeRuntime.currentStage];
             const requiresAiConfirmation=selectedCombination?.triggerType==='SEQUENCE_AI'&&runtime.galeRuntime.currentStage>0;
-            if((activeStage?.execution?.policy==='AFTER_ENTRY_CONFIRMATION'||requiresAiConfirmation)&&!runtime.galeRuntime.entryConfirmed){
-              runtime.galeRuntime.entryConfirmed=true;runtime.galeRuntime.waitingSignals=0;
+            const requiresDynamicFirstGale=runtime.galeRuntime.currentStage===1&&runtime.galeRuntime.awaitingDynamicFirstGale===true&&result.signal.result==='LOSS';
+            if((activeStage?.execution?.policy==='AFTER_ENTRY_CONFIRMATION'||requiresAiConfirmation||requiresDynamicFirstGale)&&!runtime.galeRuntime.entryConfirmed){
+              runtime.galeRuntime.entryConfirmed=true;runtime.galeRuntime.awaitingDynamicFirstGale=false;runtime.galeRuntime.waitingSignals=0;
               const amountsCents=resolveStageAmounts(runtime,activeBetPlan,runtime.galeRuntime.currentStage);runtime.galeRuntime.preparedLegAmountsCents=amountsCents;
               if(!awaitsReferencedSignalPreparation(terminal))this.prepareStageOrPause(terminal,runtime,event.round.deliveryMode,runtime.galeRuntime.currentStage,activeBetPlanId,amountsCents);
             }
@@ -580,7 +592,7 @@ export class TerminalManager {
     const plan=this.repository.getBetPlanConfig(betPlanId);const stakeCents=amountsCents.reduce((total,amount)=>total+amount,0);
     const reason=stakeCents<=0?'Etapa sem valor de aposta':bankrollStopReason(runtime.bankrollState,stakeCents,plan?.bankrollLimits);
     if(reason){runtime.status='PAUSED';runtime.pauseState={type:'RULE',reason,ruleId:null,sourceTerminalId:terminal.id};runtime.bankrollState.stopReason=reason;runtime.updatedAt=new Date().toISOString();this.unsubscribeByTerminal.get(terminal.id)?.();this.unsubscribeByTerminal.delete(terminal.id);this.repository.saveTerminalRuntime(runtime);return false;}
-    void this.assistedPreparationHandler?.({terminalId:terminal.id,deliveryMode,stageIndex,betPlanId,amountsCents});return true;
+    const preparation=this.assistedPreparationHandler?.({terminalId:terminal.id,deliveryMode,stageIndex,betPlanId,amountsCents});if(preparation){const task=Promise.resolve(preparation);const roundTasks=this.roundPreparationTasks.get(terminal.id);if(deliveryMode==='LIVE'&&roundTasks)roundTasks.push(task);else void task.catch(()=>undefined);}return true;
   }
 
   private currentBankrollBlockReason(terminal:Terminal,runtime:TerminalRuntime):string|null{
