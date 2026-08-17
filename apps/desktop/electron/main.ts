@@ -304,6 +304,7 @@ app.whenReady()
     terminalManager = new TerminalManager(database, roundEventBus);
     terminalManager.initialize();
     for(const terminalId of terminalUpdateStates.keys())terminalManager.requireConfigurationUpdate(terminalId);
+    await rebuildIncompleteTerminalHistories();
     screenAutomation = new ScreenAutomationService();
     scheduleInactivityBetMonitoring();
     terminalManager.setAssistedPreparationHandler(request => executeAssistedPreparation(request));
@@ -709,6 +710,20 @@ async function updateTerminalDependencyChain(terminalId:string){
 function effectiveAnalysisRoundLimit(terminalId:string){return Math.max(...terminalDependencyChain(terminalId).map(id=>database.getTerminal(id)?.analysisRoundLimit??0),database.getTerminal(terminalId)?.analysisRoundLimit??5_000);}
 
 function mergedTerminalRounds(terminal:Terminal){const limit=effectiveAnalysisRoundLimit(terminal.id);const operationalRounds=database.getBacktestRounds(terminal.platformId,limit);const archivedRounds=archiveDatabase.getRounds(terminal.platformId,limit,true);return[...new Map([...archivedRounds,...operationalRounds].map(round=>[round.dedupKey,round])).values()].sort((left,right)=>left.occurredAt.localeCompare(right.occurredAt)).slice(-limit);}
+
+async function rebuildIncompleteTerminalHistories(){
+  const rebuilt=new Set<string>();
+  const terminals=database.listTerminals().sort((left,right)=>terminalDependencyChain(left.id).length-terminalDependencyChain(right.id).length);
+  for(const terminal of terminals){
+    if(rebuilt.has(terminal.id))continue;
+    const availableRounds=mergedTerminalRounds(terminal).length;
+    const processedRounds=terminalManager.getRuntime(terminal.id)?.gameStrategyRuntime.processedRounds??0;
+    if(availableRounds===0||processedRounds>=availableRounds)continue;
+    updateSplash(`Reconstruindo hist\u00f3rico de ${terminal.name}...`,56);
+    await updateTerminalDependencyChain(terminal.id);
+    for(const id of terminalDependencyChain(terminal.id))rebuilt.add(id);
+  }
+}
 
 async function preloadTerminalHistoryChunked(terminalId:string,onProgress:(progress:number)=>void,full=true){
   const terminal=database.getTerminal(terminalId);if(!terminal)return 0;const effectiveRoundLimit=effectiveAnalysisRoundLimit(terminal.id);const rounds=mergedTerminalRounds(terminal);
