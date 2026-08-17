@@ -16,7 +16,8 @@ export interface MultiplierCondition {
 }
 
 export interface GameStrategyConfig {
-  trigger: MultiplierCondition[];
+  /** Um gatilho legado (condições em E) ou vários gatilhos alternativos (grupos em OU). */
+  trigger: MultiplierCondition[] | MultiplierCondition[][];
   win: MultiplierCondition[];
   loss: MultiplierCondition[];
   afterLoss: MultiplierCondition[];
@@ -364,7 +365,7 @@ export interface Terminal {
   platformId: string;
   gameStrategyId: string;
   strategySourceTerminalId: string | null;
-  strategySourceMode: 'GAME_SIGNALS' | 'BET_EXECUTIONS';
+  strategySourceMode: 'GAME_SIGNALS' | 'ALL_SOURCE_SIGNALS' | 'BET_EXECUTIONS' | 'BET_ENTRIES';
   betStrategyId: string;
   betStrategyWinId: string;
   betStrategyLossId: string;
@@ -379,6 +380,8 @@ export interface Terminal {
   paused: boolean;
   historyDisplayLimit: number;
   analysisRoundLimit: number;
+  /** Quantidade de sinais W/L ignorados financeiramente depois de uma aposta vencedora. */
+  postWinSkipSignals: number;
   bankrollStartAt: string | null;
   entryBlockPatterns: string[];
   operationCombinations: TerminalOperationCombination[];
@@ -512,7 +515,7 @@ export interface TerminalRuntime {
   gameStrategyRuntime: { state: GameStrategyState; processedRounds: number; lastMultiplier: number | null; triggerRoundId: string | null; releaseProgress: number; lastAnnotationRole?: RoundAnnotationRole | null };
   resultAnalyzerState: ResultAnalyzerState;
   sequenceAiRuntime: SequenceAiRuntime;
-  betStrategyRuntime: { lastDecisionId: string | null; lastAction: BetAction | null; decisionCount: number; entryCount: number; ignoredCount: number };
+  betStrategyRuntime: { lastDecisionId: string | null; lastAction: BetAction | null; decisionCount: number; entryCount: number; ignoredCount: number; postWinSkipRemaining: number };
   galeRuntime: { active: boolean; currentStage: number; cycleId: string | null; activeBetPlanId: string | null; activeCombinationId?:string|null; onWinBetPlanId: string | null; followUp: boolean; followUpBehavior: 'RUN_ONCE' | 'REPEAT_UNTIL_LOSS'; triggerLossStreakTarget?: number | null; triggerLossProgress?:number; awaitingDynamicFirstGale?:boolean; previousAmountCents?: number; accumulatedLossCents?: number; waitingSignals?: number; entryConfirmed?:boolean; failedCycleAttempts?:number; preparedLegAmountsCents?: number[]; currentCycleWinCount?:number; currentCycleLossCount?:number; lastCycleWinCount?:number; lastCycleLossCount?:number; operationalPreparationKey?:string|null };
   bankrollState: BankrollMetrics;
   screenControllerState: { status: 'IDLE' | 'READY' | 'MOCKING' | 'PREPARING' | 'PAUSED' | 'INVALID' | 'ERROR'; paused: boolean };

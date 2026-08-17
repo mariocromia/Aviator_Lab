@@ -264,7 +264,8 @@ async function checkInactivityBets() {
       if (idleSeconds < rule.minutes * 60) { inactivityTriggeredTerminals.delete(profile.terminalId); continue; }
       if (inactivityTriggeredTerminals.has(profile.terminalId)) continue;
       const terminal = database.getTerminal(profile.terminalId);
-      if (!terminal || terminal.mode !== 'ASSISTED' || !terminal.enabled || terminal.paused) continue;
+      const runtime=terminalManager.getRuntime(profile.terminalId);
+      if (!terminal || terminal.mode !== 'ASSISTED' || !terminal.enabled || terminal.paused || runtime?.status!=='RUNNING' || runtime.screenControllerState.paused) continue;
       const display = screen.getAllDisplays()[profile.monitorIndex ?? 0] ?? screen.getPrimaryDisplay();
       const validation = validateScreenProfile(profile, { width: display.size.width, height: display.size.height });
       if (!validation.valid) { database.logEvent('SCREEN_CONTROLLER', 'WARN', 'INACTIVITY_BET_INVALID_PROFILE', { terminalId: terminal.id, issues: validation.issues }); continue; }

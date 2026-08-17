@@ -29,6 +29,7 @@ class MemoryRepository implements TerminalRuntimeRepository {
   saveGameSignal(signal: GameSignal) { this.signals.push(signal); }
   getTerminalGameSignalByRound(terminalId:string,roundId:string){return[...this.signals].reverse().find((signal:GameSignal)=>signal.terminalId===terminalId&&signal.resultRoundId===roundId)??null;}
   getTerminalBetExecutionByRound(terminalId:string,roundId:string){const signal=this.getTerminalGameSignalByRound(terminalId,roundId);return signal?[...this.executions].reverse().find(execution=>execution.terminalId===terminalId&&execution.gameSignalId===signal.id)??null:null;}
+  getTerminalEntryDecisionByRound(terminalId:string,roundId:string){const signal=this.getTerminalGameSignalByRound(terminalId,roundId);return signal?[...this.decisions].reverse().find(decision=>decision.terminalId===terminalId&&decision.gameSignalId===signal.id&&decision.action==='ENTER')??null:null;}
   getBetStrategyConfig(id:string) { return this.betStrategyConfigs.get(id)??this.betStrategyConfig; }
   saveBetDecision(decision: BetDecision) { this.decisions.push(decision); }
   updateTerminalGameStats(id: string, wins: number, losses: number) { const terminal = this.terminals.get(id); if (terminal) { terminal.gameWins = wins; terminal.gameLosses = losses; } }
@@ -109,6 +110,25 @@ describe('TerminalManager', () => {
     expect(runtime.betStrategyRuntime.lastAction).toBe('ENTER');
     expect(runtime.betStrategyRuntime.entryCount).toBe(1);
     expect(repository.decisions.map(decision => decision.action)).toEqual(['IGNORE', 'ENTER']);
+  });
+
+  it('continua contando sinais W/L e bloqueia somente apostas após WIN',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Espera pós-WIN');terminal.postWinSkipSignals=3;repository.betPlanStageCount=1;
+    repository.betStrategyConfig={rules:[{id:'always-enter',name:'Sempre entrar',enabled:true,priority:1,conditions:[{field:'winCount',operator:'GTE',value:0}],action:'ENTER'}]};repository.saveTerminal(terminal);
+    const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    const publishSignal=async()=>{await manager.routeRoundToTerminals(makeRound(1.72));await manager.routeRoundToTerminals(makeRound(2.5));};
+    await publishSignal(); // arma a primeira BASE
+    await publishSignal(); // liquida WIN e inicia a espera
+    expect(manager.getRuntime(terminal.id)?.betStrategyRuntime.postWinSkipRemaining).toBe(3);
+    for(let index=0;index<3;index++)await publishSignal();
+    expect(manager.getRuntime(terminal.id)?.betStrategyRuntime.postWinSkipRemaining).toBe(0);
+    expect(repository.signals).toHaveLength(5);
+    expect(repository.decisions.slice(-4).map(item=>item.action)).toEqual(['IGNORE','IGNORE','IGNORE','ENTER']);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.active).toBe(true);
+    await publishSignal();
+    expect(repository.signals).toHaveLength(6);
+    expect(repository.executions).toHaveLength(2);
+    expect(manager.getRuntime(terminal.id)?.betStrategyRuntime.postWinSkipRemaining).toBe(3);
   });
 
   it('always uses the bet plan configured on the terminal, ignoring a legacy main plan on the entry rule', async () => {
@@ -288,6 +308,39 @@ describe('TerminalManager', () => {
     const copyRuntime=manager.getRuntime(copy.id)!;copyRuntime.galeRuntime.active=true;copyRuntime.galeRuntime.cycleId=crypto.randomUUID();copyRuntime.galeRuntime.activeBetPlanId=copy.betPlanId;
     await manager.routeRoundToTerminals(makeRound(3.2));
     expect(preparations).toEqual([{terminalId:third.id,stageIndex:0}]);
+  });
+
+  it('copies every ENTER approved by the filter into the following physical round',async()=>{
+    const repository=new MemoryRepository();const filter=makeTerminal('Filtro 3X');filter.enabled=false;
+    const real=makeTerminal('Aposta real 3X');real.strategySourceTerminalId=filter.id;real.strategySourceMode='BET_ENTRIES';real.mode='ASSISTED';
+    repository.betPlanConfig={stages:[{index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:3}]}]};
+    repository.saveTerminal(filter);repository.saveTerminal(real);const preparations:number[]=[];const manager=new TerminalManager(repository,new RoundEventBus());manager.setAssistedPreparationHandler(request=>{if(request.terminalId===real.id)preparations.push(request.stageIndex)});manager.initialize();
+    const armedRound=makeRound(4.2);const signal:GameSignal={id:crypto.randomUUID(),terminalId:filter.id,platformId:filter.platformId,strategyId:filter.gameStrategyId,triggerRoundId:armedRound.id,resultRoundId:armedRound.id,result:'WIN',metadata:{multiplier:4.2},createdAt:armedRound.occurredAt};repository.signals.push(signal);repository.decisions.push({id:crypto.randomUUID(),terminalId:filter.id,platformId:filter.platformId,betStrategyId:filter.betStrategyWinId,gameSignalId:signal.id,ruleId:'filtered-entry',action:'ENTER',metadata:{},createdAt:armedRound.occurredAt});
+    await manager.routeRoundToTerminals(armedRound);
+    expect(manager.getRuntime(real.id)?.galeRuntime).toMatchObject({active:true,currentStage:0});
+    expect(repository.executions.filter(item=>item.terminalId===real.id)).toHaveLength(0);
+    expect(preparations).toEqual([0]);
+    await manager.routeRoundToTerminals(makeRound(3.2));
+    expect(repository.executions.filter(item=>item.terminalId===real.id).map(item=>({result:item.result,stake:item.stakeCents}))).toEqual([{result:'WIN',stake:100}]);
+    expect(manager.getRuntime(real.id)?.galeRuntime.active).toBe(false);
+  });
+
+  it('does not create extra entries from its own W/L while copying armed entries',async()=>{
+    const repository=new MemoryRepository();const filter=makeTerminal('Filtro');filter.enabled=false;const real=makeTerminal('Real');real.strategySourceTerminalId=filter.id;real.strategySourceMode='BET_ENTRIES';
+    repository.betStrategyConfig={rules:[{id:'always',name:'Sempre',enabled:true,priority:1,conditions:[{field:'bankroll',operator:'GTE',value:0}],action:'ENTER'}]};
+    repository.betPlanConfig={stages:[{index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:3}]}]};repository.saveTerminal(filter);repository.saveTerminal(real);const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    const armedRound=makeRound(2.2);const signal:GameSignal={id:crypto.randomUUID(),terminalId:filter.id,platformId:filter.platformId,strategyId:filter.gameStrategyId,triggerRoundId:armedRound.id,resultRoundId:armedRound.id,result:'LOSS',metadata:{multiplier:2.2},createdAt:armedRound.occurredAt};repository.signals.push(signal);repository.decisions.push({id:crypto.randomUUID(),terminalId:filter.id,platformId:filter.platformId,betStrategyId:filter.betStrategyLossId,gameSignalId:signal.id,ruleId:'filtered-entry',action:'ENTER',metadata:{},createdAt:armedRound.occurredAt});
+    await manager.routeRoundToTerminals(armedRound);await manager.routeRoundToTerminals(makeRound(1.2));await manager.routeRoundToTerminals(makeRound(1.1));
+    expect(repository.executions.filter(item=>item.terminalId===real.id)).toHaveLength(1);
+    expect(manager.getRuntime(real.id)?.galeRuntime.active).toBe(false);
+  });
+
+  it('does not bet on a source signal rejected as SEM APOSTA by the filter',async()=>{
+    const repository=new MemoryRepository();const filter=makeTerminal('Filtro');filter.enabled=false;const real=makeTerminal('Real');real.strategySourceTerminalId=filter.id;real.strategySourceMode='BET_ENTRIES';repository.saveTerminal(filter);repository.saveTerminal(real);const manager=new TerminalManager(repository,new RoundEventBus());manager.initialize();
+    const round=makeRound(1.2);const signal:GameSignal={id:crypto.randomUUID(),terminalId:filter.id,platformId:filter.platformId,strategyId:filter.gameStrategyId,triggerRoundId:round.id,resultRoundId:round.id,result:'LOSS',metadata:{multiplier:1.2},createdAt:round.occurredAt};repository.signals.push(signal);repository.decisions.push({id:crypto.randomUUID(),terminalId:filter.id,platformId:filter.platformId,betStrategyId:filter.betStrategyLossId,gameSignalId:signal.id,ruleId:null,action:'IGNORE',metadata:{},createdAt:round.occurredAt});
+    await manager.routeRoundToTerminals(round);await manager.routeRoundToTerminals(makeRound(4));
+    expect(repository.executions.filter(item=>item.terminalId===real.id)).toHaveLength(0);
+    expect(manager.getRuntime(real.id)?.galeRuntime.active).toBe(false);
   });
 
   it('replays all supplied historical rounds so the UI can retain the latest 500 calculated signals',()=>{
@@ -619,5 +672,23 @@ describe('TerminalManager', () => {
     await new Promise<void>(resolve=>setImmediate(resolve));
     expect(started).toBe(true);expect(finished).toBe(false);expect(published).toBe(false);
     release();expect(await publication).toBe(1);expect(finished).toBe(true);expect(published).toBe(true);
+  });
+  it('aciona o mouse de NEXT_VALID_SIGNAL somente quando o novo gatilho aparece',async()=>{
+    const repository=new MemoryRepository();const terminal=makeTerminal('Gale no gatilho');repository.saveTerminal(terminal);
+    repository.betPlanConfig={stages:[
+      {index:0,label:'BASE',legs:[{slot:1,amountCents:100,cashout:10}]},
+      {index:1,label:'GALE 1',legs:[{slot:1,amountCents:112,cashout:10}],execution:{policy:'NEXT_VALID_SIGNAL'}}
+    ]};
+    const preparations:number[]=[];const manager=new TerminalManager(repository,new RoundEventBus());manager.setAssistedPreparationHandler(request=>{preparations.push(request.stageIndex)});manager.initialize();
+    for(const multiplier of[1.72,1.25,2.27,1.25])await manager.routeRoundToTerminals(makeRound(multiplier));
+    expect(preparations).toEqual([0]);
+    await manager.routeRoundToTerminals(makeRound(2.27));
+    await manager.routeRoundToTerminals(makeRound(1.25));
+    expect(repository.executions.at(-1)?.stageIndex).toBe(0);
+    expect(manager.getRuntime(terminal.id)?.galeRuntime.currentStage).toBe(1);
+    expect(preparations).toEqual([0]);
+    await manager.routeRoundToTerminals(makeRound(2.27));
+    expect(['TRIGGER','RELEASE_TRIGGER']).toContain(manager.getRuntime(terminal.id)?.gameStrategyRuntime.lastAnnotationRole);
+    expect(preparations).toEqual([0,1]);
   });
 });

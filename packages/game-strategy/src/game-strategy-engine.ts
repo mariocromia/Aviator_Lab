@@ -24,7 +24,7 @@ export class GameStrategyEngine {
     let signal: GameSignal | null = null;
 
     if (stateBefore === 'SEARCH_TRIGGER') {
-      if (matches(round.multiplier, config.trigger)) {
+      if (matchesTrigger(round.multiplier, config.trigger)) {
         role = 'TRIGGER';
         runtime.state = 'WAIT_RESULT';
         runtime.triggerRoundId = round.id;
@@ -76,6 +76,15 @@ export class GameStrategyEngine {
 
 export function matches(multiplier: number, conditions: MultiplierCondition[]): boolean {
   return conditions.length > 0 && conditions.every(condition => evaluate(multiplier, condition));
+}
+
+/** Grupos são alternativas (OU); as condições de cada grupo são cumulativas (E). */
+export function matchesTrigger(multiplier: number, trigger: GameStrategyConfig['trigger']): boolean {
+  if (trigger.length === 0) return false;
+  const groups = Array.isArray(trigger[0])
+    ? trigger as MultiplierCondition[][]
+    : [trigger as MultiplierCondition[]];
+  return groups.some(group => matches(multiplier, group));
 }
 
 function evaluate(multiplier: number, condition: MultiplierCondition): boolean {

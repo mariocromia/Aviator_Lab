@@ -19,6 +19,20 @@ const makeRound = (multiplier: number): NormalizedRound => ({
 const initialRuntime = (): TerminalRuntime['gameStrategyRuntime'] => ({ state: 'SEARCH_TRIGGER', processedRounds: 0, lastMultiplier: null, triggerRoundId: null, releaseProgress: 0 });
 
 describe('GameStrategyEngine', () => {
+  it('aceita gatilhos de intervalos alternativos', () => {
+    const engine = new GameStrategyEngine();
+    const multiTriggerConfig: GameStrategyConfig = {
+      ...config,
+      trigger: [
+        [{ operator: 'BETWEEN', value: [1.1, 1.2] }],
+        [{ operator: 'BETWEEN', value: [3, 4] }]
+      ]
+    };
+    const first = engine.process({ terminalId: crypto.randomUUID(), strategyId: crypto.randomUUID(), config: multiTriggerConfig, runtime: initialRuntime(), round: makeRound(2) });
+    const second = engine.process({ terminalId: crypto.randomUUID(), strategyId: crypto.randomUUID(), config: multiTriggerConfig, runtime: initialRuntime(), round: makeRound(3.5) });
+    expect(first.annotation.role).toBe('NORMAL');
+    expect(second.annotation.role).toBe('TRIGGER');
+  });
   it('executes the critical WAIT_RELEASE sequence deterministically', () => {
     const engine = new GameStrategyEngine();
     let runtime = initialRuntime();
